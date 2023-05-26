@@ -1,6 +1,7 @@
 # SoloLab V 0.1
 ### Python Tool for multi-instrument studies with Solar Orbiter Data
-This tutorial will help you in the installation the requirements for using soloLab, a tool to process and visualize multi-instrument data from [Solar Orbiter](https://www.esa.int/Science_Exploration/Space_Science/Solar_Orbiter): A spacecraft launched in February 2020 with 10 instruments onboard dedicated to study the sun from up close (at distances down to 0.27 AU or 60 solar Radii). Among these instruments, the three instruments we are concerned about in the early development of this tool are:
+
+This  python tool is designed to process and visualize multi-instrument data from [Solar Orbiter](https://www.esa.int/Science_Exploration/Space_Science/Solar_Orbiter): A spacecraft launched in February 2020 with 10 instruments onboard dedicated to study the sun from up close (at distances down to 0.27 AU or 60 solar Radii). Among these instruments, the three instruments we are concerned about in the early development of this tool are:
 - **[STIX](https://solar-orbiter.cnes.fr/en/SOLO/GP_stix.htm):** the **S**pectrometer **T**elescope for **I**maging **X**-rays.
 - **[RPW](https://rpw.lesia.obspm.fr/):**  the **R**adio and **P**lasma **W**aves instrument.
 - **[EPD](https://espada.uah.es/epd/index.php):**  the **E**nergetic **P**articles **D**etector.
