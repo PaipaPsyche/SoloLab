@@ -1,13 +1,13 @@
 # SoloLab V 0.1
 ### Python Tool for multi-instrument studies with Solar Orbiter Data
-This tutorial will help you in the installation the requirements for using soloLab, a tool to process and visualize multi-instrument data from Solar Orbiter: A spacecraft launched in February 2020 with 10 instruments onboard dedicated to study the sun from up close (at distances down to 0.27 AU or 60 solar Radii). Among these instruments, the three instruments we are concerned about in the early development of this tool are:
-- **STIX:** the **S**pectrometer **T**elescope for **I**maging **X**-rays.
-- **RPW:**  the **R**adio and **P**lasma **W**aves instrument.
-- **EPD:**  the **E**nergetic **P**articles **D**etector.
+This tutorial will help you in the installation the requirements for using soloLab, a tool to process and visualize multi-instrument data from [Solar Orbiter](https://www.esa.int/Science_Exploration/Space_Science/Solar_Orbiter): A spacecraft launched in February 2020 with 10 instruments onboard dedicated to study the sun from up close (at distances down to 0.27 AU or 60 solar Radii). Among these instruments, the three instruments we are concerned about in the early development of this tool are:
+- **[STIX](https://solar-orbiter.cnes.fr/en/SOLO/GP_stix.htm):** the **S**pectrometer **T**elescope for **I**maging **X**-rays.
+- **[RPW](https://rpw.lesia.obspm.fr/):**  the **R**adio and **P**lasma **W**aves instrument.
+- **[EPD](https://espada.uah.es/epd/index.php):**  the **E**nergetic **P**articles **D**etector.
 
 Since the spacecraft was launched recently, the scientific teams of each instrument are still figuring out the behavior of the measurements they take therefore, specialized libraries for processing data from the Solar Orbiter instruments are still under development (or revision).
 
-Traditionally, data analysis in heliophysics was done using a custom-made wrapper library called SolarSoftWare(SSW) written in the programming language IDL. Unfortunately, IDL is not free to use and lacks support to many of the modern functionalities that one would need currently - for example, machine-learning libraries. There is growing community support in porting the existing code written in IDL for various instruments to Python. SunPy is currently one of the most active efforts in this direction.
+Traditionally, data analysis in heliophysics was done using a custom-made wrapper library called [SolarSoftWare](https://soho.nascom.nasa.gov/solarsoft/) (SSW) written in the programming language IDL. Unfortunately, IDL is not free to use and lacks support to many of the modern functionalities that one would need currently - for example, machine-learning libraries. There is growing community support in porting the existing code written in IDL for various instruments to Python. SunPy is currently one of the most active efforts in this direction.
 
 The utility of a pseudo-automatic visualization tool in python comes from the need of correlating the properties of different emissions of solar flares, which can provide information on the physical processes of particle acceleration in flares and their transport across the heliosphere. Comparing the data time series from multiple instruments can help to determine the association between radio, x-ray and particle events, thus allowing to have a broader context to analyze solar transient events. Combined observations can also draw interesting results in other areas of heliophysics; not only measuring the properties of transients, but may also help to get a deeper knowledge of the quiet sun and the beahvior of the heliosphere.
 
