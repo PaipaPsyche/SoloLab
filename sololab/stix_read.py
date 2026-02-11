@@ -13,7 +13,7 @@ import astropy.constants as cs
 
  # STIX data read
 
-def stix_create_counts(pathfile, is_bkg=False,time_arr=None,correct_flight_time=False,energy_shift=0):
+def stix_create_counts(pathfile, is_bkg=False,time_arr=None,date_range=None,correct_flight_time=False,energy_shift=0):
 
     #is spectrogram file
     spectrogram_file=False
@@ -130,7 +130,18 @@ def stix_create_counts(pathfile, is_bkg=False,time_arr=None,correct_flight_time=
 
         except:
             data_time = Time(header['DATE-BEG']) + TimeDelta(data['time'] * u.s)+TimeDelta(earth_sc_delay * u.s)
-        data_time = [t.datetime for t in data_time]
+        data_time = np.array([t.datetime for t in data_time])
+
+
+        if(date_range):
+            date_range=[datetime.strptime(x,std_date_fmt) for x in date_range]
+            d_idx = np.array([True if np.logical_and(x>=date_range[0],x<=date_range[1]) else False for x in data_time])
+            
+            print("shapes",np.shape(d_idx),np.shape(data_time),np.shape(data_counts_per_sec))
+            data_time=data_time[np.where(d_idx)[0]]
+            data_counts_per_sec = data_counts_per_sec[np.where(d_idx)[0],:]
+
+        
 
 
 
@@ -147,9 +158,9 @@ def stix_create_counts(pathfile, is_bkg=False,time_arr=None,correct_flight_time=
 
 
 
-def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,correct_flight_time = False,energy_shift=0):
+def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,date_range=None,correct_flight_time = False,energy_shift=0,bkg_poll_function='mean'):
     #import L1 data
-    data_L1 = stix_create_counts(pathfile,energy_shift=energy_shift)
+    data_L1 = stix_create_counts(pathfile,energy_shift=energy_shift,date_range=date_range)
 
     bkg_count_spec = None
     data_counts_per_sec_nobkg = np.array(data_L1["counts_per_sec"])
@@ -173,8 +184,13 @@ def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,correct_fli
         d_idx = np.array([True if np.logical_and(x>=date_range[0],x<=date_range[1]) else False for x in data_L1["time"]])
 
 
+        # define function to poll bkg values per energy bin
+        func_bkg = get_poll_func(bkg_poll_function)
 
-        bkg_interv_spec = np.mean(data_counts_per_sec_nobkg[d_idx,:],axis=0)[:min_channels]
+
+
+
+        bkg_interv_spec = func_bkg(data_counts_per_sec_nobkg[d_idx,:],axis=0)[:min_channels]
         bkg_array =  np.array([bkg_interv_spec for i in range(np.shape(data_counts_per_sec_nobkg)[0])])
         data_counts_per_sec_nobkg = data_counts_per_sec_nobkg - bkg_array
 
@@ -193,11 +209,11 @@ def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,correct_fli
 
     return return_dict
 
-def stix_combine_files(filenames,bkgfile=None,correct_flight_time=False,stix_bkg_range=None,force=False,energy_shift=0):
+def stix_combine_files(filenames,bkgfile=None,correct_flight_time=False,stix_bkg_range=None,force=False,energy_shift=0,bkg_poll_function='mean'):
     if(not stix_bkg_range):
         stix_bkg_range = [None for n in filenames]
     if bkgfile:
-        return stix_combine_counts([stix_remove_bkg_counts(x,bkgfile,stix_bkg_range=y,energy_shift=energy_shift) for x,y in zip(filenames,stix_bkg_range)],force=force)
+        return stix_combine_counts([stix_remove_bkg_counts(x,bkgfile,stix_bkg_range=y,energy_shift=energy_shift,bkg_poll_function=bkg_poll_function) for x,y in zip(filenames,stix_bkg_range)],force=force)
     else:
         return stix_combine_counts([stix_create_counts(x,stix_bkg_range=y,correct_flight_time=correct_flight_time,energy_shift=energy_shift) for x,y in zip(filenames,stix_bkg_range)],force=force)
 

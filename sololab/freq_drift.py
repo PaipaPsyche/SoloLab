@@ -70,13 +70,13 @@ def create_suggested_times(time,freq,end_estimate=0.5):
 
     mid_time = time[0] + end_estimate*(time[-1]-time[0])
     idx_min=np.argmin(np.abs(np.array(time)-mid_time))
-    print(mid_time)
+    
 
     lin_m = (np.log10(freq[0])-np.log10(freq[-1]))/(time[idx_min]-time[0])
     lin_b = np.log10(freq[0])-lin_m*time[idx_min]
 
     sugg= [(np.log10(f)-lin_b)/lin_m for f in freq]
-    print(sugg,freq)
+   
     return sugg
 
 
@@ -216,16 +216,32 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
                 po = (tau_sugg(0.1),tau_sugg(0.5),2,np.min(scale_y),suggested_times[i])
                 #print(bnds,po)
                 popt,pcov = cfit(func.f,x_,scale_y,p0=po,bounds=bnds)
+            elif (func.name() == "gauss_gauss" or func.name() == "gauss_exp"):
+                #params ->  [t_on,t_off,tpeak,scale,bkg]
+
+                tau_sugg = lambda f: (np.max(x_)-np.min(x_))*f
+                bkg_aprox = np.mean(np.sort(scale_y)[-int(0.2*len(scale_y)):])
+
+
+                bnds = ([0,0,np.min(x_),0,np.min(scale_y)],
+                        [1.5*np.max(x_),1.5*np.max(x_),np.max(x_),20,bkg_aprox])
+                po = (tau_sugg(0.1),tau_sugg(0.5),suggested_times[i],2,np.min(scale_y))
+                #print(bnds,po)
+                popt,pcov = cfit(func.f,x_,scale_y,p0=po,bounds=bnds)
+            
+
 
             # for cases where parameters were found
             if (len(popt)>0) :
                 found_center = func.center(popt)
+                
                 # diference with previous found point
                 dif = found_center-prev_center
                 if(i==len(freq_data)-1):
                     dif = 0
                 # discard if center out of bounds
                 if(found_center<(x_[0]*(1-tol)) or found_center>(x_[-1]*(1+tol))):
+                    #print(i,freq_data[i])
                     print("[{}] {:.0f} kHz   : Not in bounds! omitted.".format(i,freq_data[i]))
                     unsolved_freqs.append(freq_data[i])
                 else:
@@ -233,12 +249,17 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
                     if(len(starting_point)==0):
                         starting_point = [freq_data[i],sec_t0_to_dt([found_center],t0)[0]]
                         sp_t=datetime.strftime(starting_point[1],dt_fmt)
+                        #print(freq_data[i],f_err[i],sp_t)
                         print("Starting point ---------- frequency: {:.0f}+-{:.0f} kHz   time: {}".format(freq_data[i],f_err[i],sp_t))
 
 
                     # FITTING ERROR
 
-                    snr = 10**(func.peak_height(popt))
+                    pk_hgh = func.peak_height(popt)
+                    if (isinstance(pk_hgh, (list, tuple, np.ndarray))):
+                        pk_hgh = pk_hgh[0]
+                    snr = 10**(pk_hgh)
+                    
 
                     ## ADD CURVE FIT TO SOLUTIONS
                     f_key = int(freq_data[i])
@@ -250,7 +271,7 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
                     curve_fits[f_key]["center"]=func.center(popt)
                     curve_fits[f_key]["dev"]=func.dev(popt)
                     curve_fits[f_key]["fit_function"]=func.name()
-                    curve_fits[f_key]["peak_height"]=func.peak_height(popt)
+                    curve_fits[f_key]["peak_height"]=pk_hgh
 
                     if(func.f_onset):
                         curve_fits[f_key]["onset"]= func.onset(popt)
@@ -265,7 +286,8 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
                     for mtrc in metrics:
                         txt_metrics+="{} = {}  ".format(mtrc.upper(),round(curve_fits[f_key][mtrc],2))
                     # prints
-                    print("[{}] {:.0f} kHz: Fit found!   t-t0: {:.2f} s   Dif.: {:.2f} s  Log10(S/N): {:.2f}".format(i,freq_data[i],found_center,dif,np.log10(snr)))
+                    #print(i,freq_data[i],found_center,dif,snr)
+                    print("[{}] {:.0f} kHz: Fit found!   t-t0: {:.2f} s   Dif.: {:.2f} s  Log10(S/N): {:.2f}".format(i,freq_data[i],found_center,dif,pk_hgh))
                     print("                             "+txt_metrics)
                     # restart center position if center found
                     prev_center = found_center
@@ -277,7 +299,7 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
             print("[{}] {:.0f} kHz   : [ERROR] Not processed.".format(i,freq_data[i]))
             print("    ",e)
             unsolved_freqs.append(freq_data[i])
-
+    # I know you might feel compelled to delete this secondary loop, David, but pls dont, trust me
     if(secondary_loop and len(unsolved_freqs)>0):
 
         print(35*"-","Secondary Loop (unsolved freqs)",35*"-")
@@ -335,6 +357,19 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
                             [np.max(x_),np.max(x_),20,bkg_aprox,np.max(x_)])
                             popt,pcov = cfit(func.f,x_,scale_y,p0=proposed_po,bounds=bnds)
 
+                        elif (func.name() == "gauss_gauss" or func.name() == "gauss_exp"):
+                            #params ->  [t_on,t_off,tpeak,scale,bkg]
+
+                            
+                            bkg_aprox = np.mean(np.sort(scale_y)[-int(0.3*len(scale_y)):])
+
+
+                            bnds = ([0,0,np.min(x_),0,np.min(scale_y)],
+                                    [np.max(x_),np.max(x_),np.max(x_),20,bkg_aprox])
+                            
+                            popt,pcov = cfit(func.f,x_,scale_y,p0=proposed_po,bounds=bnds)
+
+
                         # for cases where parameters were found
                         if (len(popt)>0) :
                             found_center = func.center(popt)
@@ -350,7 +385,11 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
 
                                 # FITTING ERROR
 
-                                snr = 10**(func.peak_height(popt))
+                                pk_hgh = func.peak_height(popt)
+                                if (isinstance(pk_hgh, (list, tuple, np.ndarray))):
+                                    pk_hgh = pk_hgh[0]
+                                
+                                snr = 10**(pk_hgh)
 
                                 ## ADD CURVE FIT TO SOLUTIONS
                                 f_key = int(freq_data[i])
@@ -361,7 +400,7 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
                                 curve_fits[f_key]["df"]=f_err[i]
                                 curve_fits[f_key]["center"]=func.center(popt)
                                 curve_fits[f_key]["dev"]=func.dev(popt)
-                                curve_fits[f_key]["peak_height"]=func.peak_height(popt)
+                                curve_fits[f_key]["peak_height"]=pk_hgh
                                 curve_fits[f_key]["fit_function"]=func.name()
 
                                 if(func.f_onset):
@@ -376,7 +415,7 @@ def rpw_fit_time_profiles(rpw_psd,func,time_range,frequency_range,metrics=["rmse
                                 for mtrc in metrics:
                                     txt_metrics+="{} = {}  ".format(mtrc.upper(),round(curve_fits[f_key][mtrc],2))
                                 # prints
-                                print("[{}] {:.0f} kHz: Fit found!   t-t0: {:.2f} s   Dif.: {:.2f} s  Log10(S/N): {:.2f}".format(i,freq_data[i],found_center,dif,np.log10(snr)))
+                                print("[{}] {:.0f} kHz: Fit found!   t-t0: {:.2f} s   Dif.: {:.2f} s  Log10(S/N): {:.2f}".format(i,freq_data[i],found_center,dif,pk_hgh))
                                 print("                             "+txt_metrics)
                         else:
                             print("[{}] {:.0f} kHz   : Fit not convergent.".format(i,freq_data[i]))
@@ -670,7 +709,7 @@ def plot_compare_fits(fits,metrics=['rmse'],subplot_size = (9,3)):
 
 
 def rpw_plot_all_fits(fits,rpw_psd,n_cols=2,subplot_size=(5,2),savename=None,
-short_tag=None,metric="rmse"):
+short_tag=None,metric="rmse",observe_freqs=[]):
 
     color_palette = ["red","blue","limegreen","orange","magenta"]
 
@@ -703,6 +742,7 @@ short_tag=None,metric="rmse"):
                 mse = ft["freq_fits"][int(sel_f)][metric]
                 y_mod = fitfun.f(x_ax,*pars)
                 cent = fitfun.center(pars)
+                ons = fitfun.onset(pars)
 
                 fname = fitfun.name() if not short_tag else fitfun.name()[:short_tag].upper()
 
@@ -710,11 +750,17 @@ short_tag=None,metric="rmse"):
                 color_ix+=1
                 plt.plot(x_ax,y_mod,label="{}  ({})".format(fname,round(mse,2)),color=col)
                 plt.axvline(cent,color=col,ls="--")
+                plt.axvline(ons,color=col,ls=":")
         if(f==len(f_ax)-1):
             plt.xlabel("Time (s)")
         if(f==0):
             plt.ylabel("Log$_{10}$ PSD(V)")
-        plt.plot(x_ax,np.log10(y_ax),color="k",ls="None",marker="x",label="{}kHz".format(sel_f))
+
+        if(sel_f in observe_freqs):
+            print(f'[{sel_f} kHz] Peak height : ',ft['freq_fits'][sel_f]['peak_height'], '  |  Max. val. point: ',round(np.max(np.log10(y_ax)),2))
+            
+
+        plt.plot(x_ax,np.log10(y_ax),color="k",ls="None",marker="x",label="{}kHz (R/Rs = {})".format(sel_f,round(r_from_freq([sel_f],ne_from_r_leblanc)[0],2)))
         leg=plt.legend(labelcolor="linecolor",fontsize=10,alignment="left",borderpad=0.3)
         leg.get_frame().set_alpha(0.3)
         for item in leg.legendHandles:
@@ -938,11 +984,33 @@ def ne_from_freq(freqs,coef=9.):
 def freq_from_ne(ne,coef=9.):
     return [coef*np.sqrt(n) for n in ne]
 
+
+# Electron density  models
+
+# input : distance in Rs 
+# output: density in cm-3 
+
+# Leblanc 1998
+def ne_from_r_leblanc(radius):
+    return [ 3.3e5*(r**(-2))+4.1e6*(r**(-4))+8.0e7*(r**(-6)) for r in radius]
+
+# Sittler Guhatakhurta
+def ne_from_r_sittler_guhathakurta(radius):
+    f_exp = lambda x: 3.26e11*np.exp(3.67/x)
+    f_1 = lambda x: x**(-2) + 4.89*x**(-3) + 7.6*x**(-4) + 6*x**(-5)
+    return np.array([f_exp(x)*f_1(x)*1e-6 for x in radius])
+
+
+
+def ne_from_r_kontar(radius):
+    return [ 4.8e9 * (r**-14)+ 3e8 * (r**-6) + 1.4e6 * (r**-2.3) for r in radius]
+
+
 def dfdn_from_ne(ne,coef=9.):
     return[(coef/2)*(1./np.sqrt(n)) for n in ne]
     
-def ne_from_r_leblanc(radius):
-    return [ 3.3e5*(r**(-2))+4.1e6*(r**(-4))+8.0e7*(r**(-6)) for r in radius]
+
+
 
 def r_from_ne(nes,ne_model,r_interv=[1,400],n_iter=5,c=0.1,npoints=1000,error=False):
 
@@ -1321,9 +1389,9 @@ def convert_c_to_roSec(vels):
 
 def rpw_estimate_beam_velocity(fit,density_model,r_interv=[0.1,300],n_iter=10,c=0.01,npoints=5000,weight_v_error=1.,only_neg_drifts=True):
     freq_drifts = fit['freq_drifts']
-    freqs = freq_drifts["conv_frequencies"]
-    freqs_low_bound = freqs[:-1]
-    freqs = (freqs[1:]+freqs[:-1])/2.
+    freqs_conv = freq_drifts["conv_frequencies"]
+    freqs_low_bound = freqs_conv[:-1]
+    freqs = (freqs_conv[1:]+freqs_conv[:-1])/2.
 
 
     delays = freq_drifts["delays"]
@@ -1334,11 +1402,12 @@ def rpw_estimate_beam_velocity(fit,density_model,r_interv=[0.1,300],n_iter=10,c=
     dt = freq_drifts["sigma_t"]
 
     if(only_neg_drifts):
-        iidx = dfdt<0
-        dfdt = dfdt[iidx]
+        iidx = dfdt<0 
+        print(len(freqs),' freqs, ',len(dfdt),' dfdts, ',np.sum(iidx),'neg drifts' )
         freqs = freqs[iidx]
         freqs_low_bound = freqs_low_bound[iidx]
         delays = delays[iidx]
+        dfdt = dfdt[iidx]
 
 
 
@@ -1728,10 +1797,10 @@ def plot_velocity_results(vel_fits,color_list=None,reg_last_n=None,fdr_last_n=No
         else:
             m, b = np.polyfit(delays, rads, 1)
 
-        t_Ro = -b/m
+        t_Ro = m+b
         onset_time = sec_t0_to_dt([t_Ro],fit['metadata']['t0'])[0]
 
-        print( fitname, 'Ro = 0 Rs at t =',round(t_Ro,2),f"s ({onset_time})")
+        print( fitname, 'Ro = 1 Rs at t =',round(t_Ro,2),f"s ({onset_time})")
 
         avg_vel = convert_RoSec_to_c([m])[0]
 

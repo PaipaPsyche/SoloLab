@@ -8,6 +8,7 @@ from astropy.io import fits
 from astropy.time.core import Time, TimeDelta
 from astropy.table import Table, vstack, hstack
 import astropy.units as u
+import cdflib
 
 
 #os.environ["CDF_LIB"] = "~/Documents/cdfpy38/src/lib/"
@@ -267,7 +268,28 @@ def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
         'frequency': freq_hfr,
         'sweep': sweepn_HFR,
         'sensor': sensor,
+
     }
+
+def rpw_read_L3_data(filepath):
+
+    cdf_file = cdflib.CDF(filepath)
+    psd_sfu_vals = cdf_file.varget('PSD_SFU')
+    
+    freqs = cdf_file.varget('FREQUENCY')
+    time = cdf_file.varget('TIMING')
+    epoch = cdf_file.varget('EPOCH')
+    bkg = cdf_file.varget('BACKGROUND')
+    time = np.array(cdflib.cdfepoch.to_datetime(epoch) )
+    flux= cdf_file.varget('PSD_FLUX')
+    
+    data = {
+    'time':time,
+    'voltage':psd_sfu_vals,
+    'frequency':freqs/1000,
+    'flux':flux
+    }
+    return data
 
 
 
@@ -366,6 +388,9 @@ def tnr_del_unwanted_values(array, freq,tnr_remove_idx=tnr_remove_idx):
 
 # RPW get data object
 def rpw_get_data(file,sensor=None,filter = tnr_remove_idx):
+    
+    datalevel =  os.path.basename(file).split('_')[1]
+
     data_types = ["hfr","tnr"]
     for dtp in data_types:
         if dtp in os.path.basename(file):
@@ -381,21 +406,30 @@ def rpw_get_data(file,sensor=None,filter = tnr_remove_idx):
     infos = os.path.basename(file).split("-")[0].split("_")
     #dts = [datetime.strptime(x,"%Y%m%dT%H%M%S") for x in os.path.basename(pathfile).split("_")[3].split("-")]
     #dts = [datetime.strftime(x,dt_fmt)for x in dts]
-    txt_type = "{}-{} {}".format(infos[2],data_type.upper() ,infos[1]).upper()
+    txt_type = "{}-{} {}".format(infos[2],data_type.upper() ,datalevel).upper()
 
     #output  dict
     print("  File: ",os.path.basename(file))
     print("  Type: ",txt_type)
     data = None
-    if(data_type=="hfr"):
-        data= rpw_read_hfr_cdf(file,sensor=sensor)
-    if(data_type=="tnr"):
+    if(datalevel=='L2'):
+        if(data_type=="hfr"):
+            data= rpw_read_hfr_cdf(file,sensor=sensor)
+        if(data_type=="tnr"):
 
-        data = rpw_read_tnr_cdf(file,sensor=sensor)
-        data = rpw_filter_freq_tnr(data,filter=filter)
+            data = rpw_read_tnr_cdf(file,sensor=sensor)
+            data = rpw_filter_freq_tnr(data,filter=filter)
+    elif(datalevel == 'L3'):
+        data = rpw_read_L3_data(file)
+            
 
     data["type"]=data_type
+    data["level"] = datalevel
     return data
+
+
+
+
 
 def rpw_filter_freq_tnr(data,filter=tnr_remove_idx):
 
@@ -409,28 +443,54 @@ def rpw_filter_freq_tnr(data,filter=tnr_remove_idx):
 
     return data
 
-
 # RPW filter frequencies
-def rpw_select_freq_indexes(frequency,data_type='hfr',**kwargs):#,freq_col=0,proposed_indexes=None):
+def rpw_select_freq_indexes_L3(frequency,data_type='hfr',**kwargs):#,freq_col=0,proposed_indexes=None):
+    #indexes of frequencies different from 0 or -99 (column 0 in frequency matrix)
+    print("  [!] Frequency selection (L3): ",data_type,'  ',kwargs["which_freqs"])
+    #,freq_col=0,proposed_indexes=None):
     #indexes of frequencies different from 0 or -99 (column 0 in frequency matrix)
 
+    # for L3 all freqs are non-zero frequencies
+    selected_freqs=np.arange(len(frequency))
+    
+    dfreq = np.array(frequency)
+    dfreq = dfreq[1:]-dfreq[:-1]
+    if kwargs["which_freqs"]=="both":
+            selected_freqs = [ j  for j in kwargs["proposed_indexes"] if j in selected_freqs]
+    if(not kwargs["freq_range"]==None):
+            
+            
+            selected_freqs = [selected_freqs[j] for j in range(len(selected_freqs)) if np.logical_and(frequency[selected_freqs[j]] <= kwargs["freq_range"][1], frequency[selected_freqs[j]]>=kwargs["freq_range"][0])]
+            
+    return selected_freqs,frequency[selected_freqs],dfreq
 
 
+
+
+# RPW filter frequencies
+def rpw_select_freq_indexes(frequency,data_type='hfr',**kwargs):
+    print("  [!] Frequency selection: ",data_type,'  ',kwargs["which_freqs"])
+    #,freq_col=0,proposed_indexes=None):
+    #indexes of frequencies different from 0 or -99 (column 0 in frequency matrix)
 
     selected_freqs=None
     if(data_type=='hfr'):
+        freq_nozero = []
+        dfreq = []
+        
         fcol = kwargs["freq_col"]
         freq_nozero = np.where(frequency.T[fcol]>0)[0]
-        selected_freqs = freq_nozero
         dfreq = np.array(frequency[freq_nozero,fcol])
         dfreq = dfreq[1:]-dfreq[:-1]
+        
         if kwargs["which_freqs"]=="both":
             selected_freqs = [ j  for j in kwargs["proposed_indexes"] if j in freq_nozero]
 
         if(not kwargs["freq_range"]==None):
-            #print(frequency[selected_freqs,fcol])
             selected_freqs = [selected_freqs[j] for j in range(len(selected_freqs)) if np.logical_and(frequency[selected_freqs[j],fcol] <= kwargs["freq_range"][1], frequency[selected_freqs[j], fcol]>=kwargs["freq_range"][0])]
-        return selected_freqs,frequency[selected_freqs,fcol],dfreq
+            return selected_freqs,frequency[selected_freqs,fcol],dfreq
+        else:
+            return selected_freqs,frequency[selected_freqs,fcol],dfreq
     elif(data_type=='tnr'):
         freq_nozero = np.where(frequency.T>0)[0]
         selected_freqs = freq_nozero
@@ -445,7 +505,15 @@ def rpw_select_freq_indexes(frequency,data_type='hfr',**kwargs):#,freq_col=0,pro
             selected_freqs = [selected_freqs[j] for j in range(len(selected_freqs)) if np.logical_and(frequency[selected_freqs[j]] <= kwargs["freq_range"][1], frequency[selected_freqs[j]]>=kwargs["freq_range"][0])]
         return selected_freqs,frequency[selected_freqs],dfreq
 
-def rpw_create_PSD(data,freq_range=None,date_range=None,freq_col=0,proposed_indexes=rpw_suggested_indexes,which_freqs="both",rpw_bkg_interval=None,sort=True):
+
+
+def rpw_create_PSD(data,freq_range=None,date_range=None,freq_col=0,proposed_indexes=rpw_suggested_indexes,which_freqs="both",rpw_bkg_interval=None,sort=True,bkg_poll_function='mean'):
+    if(data['level']=='L2'):
+        return rpw_create_PSD_L2(data,freq_range,date_range,freq_col,proposed_indexes,which_freqs,rpw_bkg_interval,sort,bkg_poll_function)
+    elif(data['level']=='L3'):
+        return rpw_create_PSD_L3(data,freq_range,date_range,freq_col,proposed_indexes,which_freqs,rpw_bkg_interval,sort,bkg_poll_function)
+
+def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_indexes=rpw_suggested_indexes,which_freqs="both",rpw_bkg_interval=None,sort=True,bkg_poll_function='mean'):
     # return,x,y,z
 
     time_data = data["time"]
@@ -492,9 +560,12 @@ def rpw_create_PSD(data,freq_range=None,date_range=None,freq_col=0,proposed_inde
     z_axis = z_axis[freq_idx,:]
 
     mn_bkg=None
-
+    polling = None
 # BKG subtraction (approx) if needed
     if rpw_bkg_interval :
+        func_bkg = get_poll_func(bkg_poll_function)
+        polling = bkg_poll_function
+
         rpw_bkg_interval=[datetime.strptime(x,std_date_fmt) for x in rpw_bkg_interval ]
         if(rpw_bkg_interval[0]>t_axis[-1] or rpw_bkg_interval[-1]<t_axis[0]):
             print("  [!] Your bkg interval is outside of the PSD time range")
@@ -503,7 +574,7 @@ def rpw_create_PSD(data,freq_range=None,date_range=None,freq_col=0,proposed_inde
 
         idx_in = [j for j in range(len(data["time"])) if np.logical_and(data["time"][j]>=rpw_bkg_interval[0],data["time"][j]<=rpw_bkg_interval[-1])]
 
-        mn_bkg = np.mean(z[np.ix_(freq_idx,idx_in)],axis=1)
+        mn_bkg = func_bkg(z[np.ix_(freq_idx,idx_in)],axis=1)
         mn_bkg = np.array([mn_bkg for i in range(np.shape(z_axis)[1])]).T
         mn_bkg = mn_bkg.clip(0,np.inf)
 
@@ -520,7 +591,9 @@ def rpw_create_PSD(data,freq_range=None,date_range=None,freq_col=0,proposed_inde
         "v":z_axis,
         "df":dfreq,
         "bkg":mn_bkg,
-        "type":data_type
+        'polling_function':polling,
+        "type":data_type,
+        'level':data['level']
     }
     print("  RPW PSD Done.")
 
@@ -529,6 +602,102 @@ def rpw_create_PSD(data,freq_range=None,date_range=None,freq_col=0,proposed_inde
 
 
     return return_dict
+
+
+
+def rpw_create_PSD_L3(data,freq_range=None,date_range=None,freq_col=0,proposed_indexes=rpw_suggested_indexes,which_freqs="non_zero",rpw_bkg_interval=None,sort=False,bkg_poll_function='mean'):
+    # return,x,y,z
+
+    time_data = data["time"]
+    z = data["voltage"].T
+    data_type = data["type"]
+    
+    flux = data["flux"].T # in W/m2/Hz
+    
+
+
+
+
+    date_idx = np.arange(len(time_data))
+    start_date,end_date = time_data[0],time_data[-1]
+    # when date range provided,select time indexes
+    if(date_range):
+        start_date = datetime.strptime(date_range[0], std_date_fmt)
+        end_date = datetime.strptime(date_range[1], std_date_fmt)
+
+    date_idx = np.array( np.where( np.logical_and(time_data<=end_date,time_data>=start_date))[0] ,dtype=int)
+
+    if(len(date_idx)==0):
+        print("  RPW Error! no data in between provided date range")
+        return
+    print("  data cropped from ",start_date," to ",end_date)
+    # define time axis
+    date_idx = np.array(date_idx)
+
+    t_axis = time_data[date_idx]
+
+    #define energy axis
+    freq_ = data['frequency']
+
+    if data_type  == "hfr":
+        freq_idx,freq_axis,dfreq = rpw_select_freq_indexes_L3(freq_,data_type=data_type,freq_col=freq_col,freq_range=freq_range,
+                                             proposed_indexes=proposed_indexes,which_freqs=which_freqs)
+    elif data_type == "tnr":
+        freq_idx,freq_axis,dfreq = rpw_select_freq_indexes_L3(freq_,data_type=data_type,freq_col=freq_col,freq_range=freq_range,
+                                         proposed_indexes=proposed_indexes,which_freqs=which_freqs)
+    
+    freq_idx = np.array(freq_idx)
+    print(f"  {len(freq_axis)} Selected frequencies [kHz]: ",*np.round(np.sort(freq_axis),2))
+
+    # selecting Z axis (cropping)
+    z_axis= z[:,date_idx]
+
+    z_axis = z_axis[freq_idx,:]
+
+    mn_bkg=None
+    polling=None
+# BKG subtraction (approx) if needed
+    if rpw_bkg_interval :
+        func_bkg = get_poll_func(bkg_poll_function)
+        polling = bkg_poll_function
+
+        rpw_bkg_interval=[datetime.strptime(x,std_date_fmt) for x in rpw_bkg_interval ]
+        if(rpw_bkg_interval[0]>t_axis[-1] or rpw_bkg_interval[-1]<t_axis[0]):
+            print("  [!] Your bkg interval is outside of the PSD time range")
+
+        print("  Creating mean bkg from ",rpw_bkg_interval[0]," to ",rpw_bkg_interval[1],"...")
+
+        idx_in = [j for j in range(len(data["time"])) if np.logical_and(data["time"][j]>=rpw_bkg_interval[0],data["time"][j]<=rpw_bkg_interval[-1])]
+
+        mn_bkg = func_bkg(z[np.ix_(freq_idx,idx_in)],axis=1)
+        mn_bkg = np.array([mn_bkg for i in range(np.shape(z_axis)[1])]).T
+        mn_bkg = mn_bkg.clip(0,np.inf)
+
+        z_axis=np.clip(z_axis-mn_bkg,1,np.inf)
+
+        print("  bkg done.")
+
+    verbose_dts(np.array(t_axis))
+    return_dict = {
+        "t_idx":date_idx,
+        "freq_idx":freq_idx,
+        "time":t_axis,
+        "frequency":freq_axis,
+        "v":z_axis,
+        "df":dfreq,
+        "bkg":mn_bkg,
+        'polling_function':polling,
+        "type":data_type,
+        'level':data["level"]
+    }
+    print("  RPW PSD Done.")
+
+    if(sort):
+        return_dict = rpw_sort_psd(return_dict)
+
+
+    return return_dict
+
 
 
 def rpw_sort_psd(rpw_psd):
@@ -551,3 +720,84 @@ def rpw_sort_psd(rpw_psd):
 
     print("  PSD Sorted.")
     return rpw_psd
+
+
+def rpw_join_psds(psds,bkg_agg="median",plot_bkg_agg=False):
+
+    # check compatibility
+    print("[RPW spectrogram combination]")
+    print("  Trying to combine ",len(psds)," spectrograms")
+
+    for i,psd_i in enumerate(psds):
+        if(not psd_i['level'] ==psds[0]['level']):
+            print("  PSD ",i, " is not compatible. check that all PSDs are of the same level (L1, L2 or L3)")
+            return 
+        if(not psd_i['type'] ==psds[0]['type']):
+            print("  PSD ",i, " is not compatible. check that all PSDs are of the same type (HFR or TNR)")
+            return  
+        if not (psd_i['frequency']==psds[0]['frequency']).all():
+            print("  PSD ",i, " is not compatible. check that all PSDs have the same frequency channels.")
+            return
+        
+    print("  All PSDs are compatible:")
+    print("    type: ",psds[0]['type'])
+    print('    Level: ',psds[0]['level'])
+    print("    Frquency range:", np.min(psds[0]["frequency"]),' to ',np.max(psds[0]["frequency"]),' kHz (',len(psds[0]["frequency"]),' channels)' )
+
+
+    #bkg aggregation
+    func = polling_functions[bkg_agg]
+    print("    BKG polling function: ",bkg_agg)
+    bkg_all =[psd['bkg'][:,0] for psd in psds]
+    meanbkg = func(bkg_all,axis=0)
+
+    # sorting psds
+    list_psds =  sorted([[i,psds[i]['time'][0]] for i in range(len(psds))], key=lambda tup: tup[1])
+
+
+    new_v = []
+    new_t = []
+
+    for j,j_psd in enumerate(list_psds):
+        chosen_psd = psds[j_psd[0]]
+        # print(len(chosen_psd['time']))
+        # print(np.shape(chosen_psd['v']))
+        if(j<len(list_psds)-1):
+            start_time_next = list_psds[j+1][1]
+            
+            t = 0
+            while(t<len(chosen_psd['time']) and chosen_psd['time'][t]<start_time_next):
+                new_t.append(chosen_psd['time'][t])
+                new_v.append(chosen_psd['v'][:,t])
+                t+=1
+        else:
+            t = 0
+            while(t<len(chosen_psd['time'])):
+                new_t.append(chosen_psd['time'][t])
+                new_v.append(chosen_psd['v'][:,t])
+                t+=1
+
+    new_v = np.array(new_v).T
+
+    print("  Combination successful. Finished.")
+    
+    
+    new_psd = {
+        # 't_idx':,
+        # 'freq_idx':,
+        'time':new_t,
+        'frequency':psds[0]['frequency'],
+        'v':new_v,
+        'df':psds[0]['df'], 
+        'bkg':np.array([meanbkg for i in range(len(new_t))]).T, 
+        'bkg_all':bkg_all,
+        'polling_function':bkg_agg, 
+        'type':psds[0]['type'], 
+        'level':psds[0]['level']
+    }
+
+    return new_psd
+
+
+
+

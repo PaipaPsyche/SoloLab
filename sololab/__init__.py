@@ -5,4 +5,6 @@ from .rpw_read import *
 from .quicklooks import *
 from .freq_drift import *
 from .electron_powerlaw import *
+from .flare_statistics import *
+from .sololab_app import *
 #from . import *

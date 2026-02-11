@@ -31,6 +31,13 @@ class powerlaw:
             if(self.warnings):
                 print(f"[!] The energy provided ({round(E,2)} keV) is below the low energy limit ({self.e_low} keV)")
         return self.A * ((E)**(-self.delta))
+    
+
+    def extrapolate_energy(self,E):
+        if(E<self.e_low):
+            if(self.warnings):
+                print(f"[!] The energy provided ({round(E,2)} keV) is below the low energy limit ({self.e_low} keV)")
+        return self.A * ((E)**(-self.delta+1))
 
     def estimate_total_flux(self):
         nd = -self.delta+1
@@ -50,6 +57,21 @@ class powerlaw:
                 return self.integrate(self.e_low,e_low=e_low,above=True)
             ans = (self.A/nd) * (self.e_high**(nd)-E**(nd))
         return ans
+    
+
+    def integrate_energy(self,E,e_low=None,above=True):
+        if(not e_low):
+            e_low = self.e_low
+        elif(e_low<self.e_low):
+            e_low = self.e_low
+
+        nd = -self.delta+2
+        ans = (self.A/nd) * (E**(nd) - e_low**(nd))
+        if(above):
+            if(E<self.e_low):
+                return self.integrate_energy(self.e_low,e_low=e_low,above=True)
+            ans = (self.A/nd) * (self.e_high**(nd)-E**(nd))
+        return ans
 
 
 
@@ -67,6 +89,27 @@ class powerlaw:
             xx = np.linspace(erange[0],erange[1],points)
             yy = [self.extrapolate(e) for e in xx]
             yy=[self.integrate(e,above=above) for e in xx]
+
+        if(real_units):
+            yy = [y*(1e35)for y in yy]
+        text_T = " T = {:.2f}".format(self.T) if self.T else ""
+        return plt.plot(xx,yy,label=f"$\delta$ = {self.delta}"+text_T,**kwargs)
+    
+
+    def plot_energy(self, erange,real_units=False,integrated=False,above=False,points=500 ,**kwargs):
+#        erange[0] = max(self.e_low,erange[0])
+#        xx = np.linspace(erange[0],erange[1],points)
+#        yy = [self.extrapolate(e) for e in xx]
+#        if(integrated):
+#            yy=[self.integrate(e,above=above) for e in xx]
+
+
+        xx = np.linspace(max(self.e_low,erange[0]),erange[1],points)
+        yy = [self.extrapolate_energy(e) for e in xx]
+        if(integrated):
+            xx = np.linspace(erange[0],erange[1],points)
+            yy = [self.extrapolate_energy(e) for e in xx]
+            yy=[self.integrate_energy(e,above=above) for e in xx]
 
         if(real_units):
             yy = [y*(1e35)for y in yy]
@@ -96,6 +139,13 @@ class double_powerlaw:
             return self.powerlaw_low.extrapolate(E)
         else:
             return self.powerlaw_high.extrapolate(E)
+        
+
+    def extrapolate_energy(self,E):
+        if(E<=self.e_break):
+            return self.powerlaw_low.extrapolate_energy(E)
+        else:
+            return self.powerlaw_high.extrapolate_energy(E)
 
     def estimate_total_flux(self):
         return self.powerlaw_low.total_flux + self.powerlaw_high.total_flux
@@ -115,9 +165,29 @@ class double_powerlaw:
                 return self.powerlaw_low.integrate(E,above=True) + self.powerlaw_high.total_flux
         else:
             if(E<self.e_break):
-                return self.powerlaw_low.integrate(E,above=False)
+                return self.powerlaw_low.integrate(E,e_low=e_low,above=False)
             elif(E>=self.e_break):
-                return self.powerlaw_high.integrate(E,above=False) + self.powerlaw_low.total_flux
+                return self.powerlaw_high.integrate(E,e_low=self.e_break,above=False) + self.powerlaw_low.integrate(self.e_break,e_low=e_low,above=False)
+            
+
+    def integrate_energy(self,E,e_low=None,above=True):
+        if(not e_low):
+            e_low = self.e_low
+        elif(e_low<self.e_low):
+            e_low = self.e_low
+
+        if(above):
+            if(E<self.e_low):
+                return self.integrate_energy(self.e_low,e_low=e_low,above=True)
+            elif(E>=self.e_break):
+                return self.powerlaw_high.integrate_energy(E,above=True)
+            elif(E<self.e_break):
+                return self.powerlaw_low.integrate_energy(E,above=True) + self.powerlaw_high.integrate_energy(self.e_break,above=True)
+        else:
+            if(E<self.e_break):
+                return self.powerlaw_low.integrate_energy(E,e_low=e_low,above=False)
+            elif(E>=self.e_break):
+                return self.powerlaw_high.integrate_energy(E,above=False) + self.powerlaw_low.integrate_energy(self.e_break,e_low=e_low,above=False)
 
 
 
@@ -137,6 +207,19 @@ class double_powerlaw:
         return plt.plot(xx,yy,label=r"$\delta_L$ = {:.2f} , $\delta_H$ = {:.2f}".format(self.delta_low,self.delta_high) + text_T,**kwargs)
 
 
+    def plot_energy(self, erange,real_units=False,integrated=False,above=False,points=500,**kwargs):
+
+        xx = np.linspace(max(self.e_low,erange[0]),erange[1],points)
+        yy = [self.extrapolate_energy(e) for e in xx]
+        if(integrated):
+            xx = np.linspace(erange[0],erange[1],points)
+            yy = [self.extrapolate_energy(e) for e in xx]
+            yy=[self.integrate_energy(e,above=above) for e in xx]
+        if(real_units):
+            yy = [y*(1e35) for y in yy]
+
+        text_T = " T = {:.2f}".format(self.T) if self.T else ""
+        return plt.plot(xx,yy,label=r"$\delta_L$ = {:.2f} , $\delta_H$ = {:.2f}".format(self.delta_low,self.delta_high) + text_T,**kwargs)
 
 
 
