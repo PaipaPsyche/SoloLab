@@ -1,4 +1,4 @@
-# SoloLab V 0.1
+# SoloLab V 0.3
 ### Python Tool for multi-instrument studies with Solar Orbiter Data
 
 This  python tool is designed to process and visualize multi-instrument data from [Solar Orbiter](https://www.esa.int/Science_Exploration/Space_Science/Solar_Orbiter): A spacecraft launched in February 2020 with 10 instruments onboard dedicated to study the sun from up close (at distances down to 0.27 AU or 60 solar Radii). Among these instruments, the three instruments we are concerned about in the early development of this tool are:
@@ -14,12 +14,21 @@ The utility of a pseudo-automatic visualization tool in python comes from the ne
 
 **SoloLab V0.1** uses python libraries and custom made scripts to treat data obtained by Solar Orbiter, helping in the following tasks:
 
-- **Data extraction:** Functions to extract STIX FITS files (L1 pixel data and spectrograms, L1 BKG files) and RPW CDF files (HFR and TNR L2 files).
+- **Data extraction:** Functions to extract STIX FITS files (L1 pixel data and spectrograms, L1 BKG files) and RPW CDF files (HFR and TNR L2 and L3 files). Download and use of EPD L2 data.
 - **Data processing:** STIX background subtraction (from BKG and/or quiet time intervals) and manual energy shifts. RPW background subtraction (from quiet time interval). Filtering of polluted frequencies for RPW.
 - **Data visualization:** Plots of simultaneous measurements of STIX and RPW (spectrograms and time profiles per energy/frequency channel) with the possibility of introducing simultaneous EPD time profiles (EPT/electrons) and X-ray spectroscopy results (injected electron powerlaws, electron abundances at different energy thresholds).
 - **Estimations and fits:** Fit of RPW time profiles (per frequency) to estimate the exciter velocity using Frequency Drift Rate Analysis (FDRA) and regression methods. Estimation of electron abundances as a function of threshold energy once given the powerlaws obtained from X-ray spectroscopy.
 
 ### Considerations and Contact
+
+#### User Warnings
+
+- **Notebook deprecation:** The `sololab_tutorial.ipynb` notebook is **not updated** and **not valid** with current methods. It will **not work with V0.3**. Please refer to the GUI tool or direct function calls for the latest examples. 
+- **New GUI tool:** A new graphical user interface tool for temporal analysis of STIX, EPD, and RPW data (including combined plots) has been added to the code. This is the recommended way to perform multi-instrument visualizations.You can the file 'test_sololabapp.py' to test the tool ( and also to check the dependencies ahve been correctly installed) 
+- **Supported data formats:** The current version now supports:
+  - RPW: L2 and L3 data
+  - STIX: L2 spectrogram data
+  - EPD/EPT: L2 data
 
 Created by **David Paipa** 
 *LESIA; Observatoire de Meudon, France*
