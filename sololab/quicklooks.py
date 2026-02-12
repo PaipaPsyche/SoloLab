@@ -992,7 +992,6 @@ def quicklook_plot(stix_counts=None,hfr_psd=None,tnr_psd=None,epd_data=None,epd_
             this_ax.xaxis.set_major_formatter(myFmt)
             this_ax.xaxis.tick_top()
         else:
-            this_ax.get_shared_x_axes().join(this_ax,axs[p-1])
             if(p==n_plots-1):
                 this_ax.set_xlabel(label_obstime,fontsize=fontsize+1)
 
@@ -1326,7 +1325,6 @@ def stix_rpw_combinedQuickLook(l1_cts,rpw_psd,tnr_psd=None,energy_range=[4,28],f
                     ax2b.set_yticklabels([])
             if(rpw_join_xaxis):
                 ax1.sharex(ax2)
-                ax1.get_shared_x_axes().join(ax1, ax2)
                 ax1.xaxis.tick_top()
                 ax1.xaxis.set_label_position('top')
             paint_markers(ax2,markers)
