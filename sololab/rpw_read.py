@@ -16,6 +16,39 @@ import cdflib
 os.environ["CDF_LIB"] = "/home/dpaipa/Documents/cdf38/src/lib/"
 from spacepy import pycdf
 
+def _parse_date(value, fmt=std_date_fmt):
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, np.datetime64):
+        return value.astype("datetime64[us]")
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
+        for alt_fmt in (numeric_date_fmt, simple_date_fmt):
+            try:
+                return datetime.strptime(value, alt_fmt)
+            except ValueError:
+                continue
+    raise ValueError(f"time data '{value}' does not match format '{fmt}'")
+
+def _coerce_time_data(time_data):
+    arr = np.asarray(time_data)
+    if np.issubdtype(arr.dtype, np.datetime64):
+        return arr
+    if arr.dtype == object:
+        try:
+            return arr.astype("datetime64[us]")
+        except (TypeError, ValueError):
+            return arr
+    if np.issubdtype(arr.dtype, np.number):
+        try:
+            return np.array(cdflib.cdfepoch.to_datetime(arr), dtype="datetime64[us]")
+        except Exception:
+            return arr.astype("datetime64[s]")
+    return arr
+
 def rpw_read_tnr_cdf(filepath, sensor=4, start_index=0, end_index=-99, data_index=0):
 
     with pycdf.CDF(filepath) as data_L2:
@@ -516,7 +549,7 @@ def rpw_create_PSD(data,freq_range=None,date_range=None,freq_col=0,proposed_inde
 def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_indexes=rpw_suggested_indexes,which_freqs="both",rpw_bkg_interval=None,sort=True,bkg_poll_function='mean'):
     # return,x,y,z
 
-    time_data = data["time"]
+    time_data = _coerce_time_data(data["time"])
     z = data["voltage"]
     data_type = data["type"]
 
@@ -527,8 +560,11 @@ def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_i
     start_date,end_date = time_data[0],time_data[-1]
     # when date range provided,select time indexes
     if(date_range):
-        start_date = datetime.strptime(date_range[0], std_date_fmt)
-        end_date = datetime.strptime(date_range[1], std_date_fmt)
+        start_date = _parse_date(date_range[0], std_date_fmt)
+        end_date = _parse_date(date_range[1], std_date_fmt)
+        if np.issubdtype(time_data.dtype, np.datetime64):
+            start_date = np.datetime64(start_date)
+            end_date = np.datetime64(end_date)
 
     date_idx = np.array( np.where( np.logical_and(time_data<=end_date,time_data>=start_date))[0] ,dtype=int)
 
@@ -566,13 +602,15 @@ def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_i
         func_bkg = get_poll_func(bkg_poll_function)
         polling = bkg_poll_function
 
-        rpw_bkg_interval=[datetime.strptime(x,std_date_fmt) for x in rpw_bkg_interval ]
+        rpw_bkg_interval=[_parse_date(x,std_date_fmt) for x in rpw_bkg_interval ]
+        if np.issubdtype(time_data.dtype, np.datetime64):
+            rpw_bkg_interval = np.array(rpw_bkg_interval, dtype="datetime64[us]")
         if(rpw_bkg_interval[0]>t_axis[-1] or rpw_bkg_interval[-1]<t_axis[0]):
             print("  [!] Your bkg interval is outside of the PSD time range")
 
         print("  Creating mean bkg from ",rpw_bkg_interval[0]," to ",rpw_bkg_interval[1],"...")
 
-        idx_in = [j for j in range(len(data["time"])) if np.logical_and(data["time"][j]>=rpw_bkg_interval[0],data["time"][j]<=rpw_bkg_interval[-1])]
+        idx_in = [j for j in range(len(time_data)) if np.logical_and(time_data[j]>=rpw_bkg_interval[0],time_data[j]<=rpw_bkg_interval[-1])]
 
         mn_bkg = func_bkg(z[np.ix_(freq_idx,idx_in)],axis=1)
         mn_bkg = np.array([mn_bkg for i in range(np.shape(z_axis)[1])]).T
@@ -608,7 +646,7 @@ def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_i
 def rpw_create_PSD_L3(data,freq_range=None,date_range=None,freq_col=0,proposed_indexes=rpw_suggested_indexes,which_freqs="non_zero",rpw_bkg_interval=None,sort=False,bkg_poll_function='mean'):
     # return,x,y,z
 
-    time_data = data["time"]
+    time_data = _coerce_time_data(data["time"])
     z = data["voltage"].T
     data_type = data["type"]
     
@@ -622,8 +660,11 @@ def rpw_create_PSD_L3(data,freq_range=None,date_range=None,freq_col=0,proposed_i
     start_date,end_date = time_data[0],time_data[-1]
     # when date range provided,select time indexes
     if(date_range):
-        start_date = datetime.strptime(date_range[0], std_date_fmt)
-        end_date = datetime.strptime(date_range[1], std_date_fmt)
+        start_date = _parse_date(date_range[0], std_date_fmt)
+        end_date = _parse_date(date_range[1], std_date_fmt)
+        if np.issubdtype(time_data.dtype, np.datetime64):
+            start_date = np.datetime64(start_date)
+            end_date = np.datetime64(end_date)
 
     date_idx = np.array( np.where( np.logical_and(time_data<=end_date,time_data>=start_date))[0] ,dtype=int)
 
@@ -661,13 +702,15 @@ def rpw_create_PSD_L3(data,freq_range=None,date_range=None,freq_col=0,proposed_i
         func_bkg = get_poll_func(bkg_poll_function)
         polling = bkg_poll_function
 
-        rpw_bkg_interval=[datetime.strptime(x,std_date_fmt) for x in rpw_bkg_interval ]
+        rpw_bkg_interval=[_parse_date(x,std_date_fmt) for x in rpw_bkg_interval ]
+        if np.issubdtype(time_data.dtype, np.datetime64):
+            rpw_bkg_interval = np.array(rpw_bkg_interval, dtype="datetime64[us]")
         if(rpw_bkg_interval[0]>t_axis[-1] or rpw_bkg_interval[-1]<t_axis[0]):
             print("  [!] Your bkg interval is outside of the PSD time range")
 
         print("  Creating mean bkg from ",rpw_bkg_interval[0]," to ",rpw_bkg_interval[1],"...")
 
-        idx_in = [j for j in range(len(data["time"])) if np.logical_and(data["time"][j]>=rpw_bkg_interval[0],data["time"][j]<=rpw_bkg_interval[-1])]
+        idx_in = [j for j in range(len(time_data)) if np.logical_and(time_data[j]>=rpw_bkg_interval[0],time_data[j]<=rpw_bkg_interval[-1])]
 
         mn_bkg = func_bkg(z[np.ix_(freq_idx,idx_in)],axis=1)
         mn_bkg = np.array([mn_bkg for i in range(np.shape(z_axis)[1])]).T

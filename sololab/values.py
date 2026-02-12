@@ -63,6 +63,16 @@ def geo_mean(iterable):
 
 
 def verbose_dts(timearr):
+    timearr = np.asarray(timearr)
+    if timearr.dtype == object:
+        try:
+            timearr = np.array(timearr, dtype="datetime64[ns]")
+        except ValueError:
+            print("  Data info: time array dtype not supported for dt stats")
+            return
+    if len(timearr) < 2:
+        print("  Data info: not enough samples for dt stats")
+        return
     tdts = timearr[1:] - timearr[:-1]
     tdts = tdts / np.timedelta64(1, 's')
     tdts = tdts.astype(float)
@@ -70,6 +80,16 @@ def verbose_dts(timearr):
     print('  Data info:')
     print(f'   Dt : Max = {np.max(tdts)}s  Min = {np.min(tdts)}s  Avg = {round(np.mean(tdts),1)}s  std = {round(np.std(tdts),1)}s  Median:{np.median(tdts)}s   Mode: {stats.mode(tdts,keepdims=True)[0][0]}s ({round(100*stats.mode(tdts,keepdims=True)[1][0]/len(tdts),1)}%)')
 
+
+
+
+polling_functions =  {
+            'mean':np.mean,
+            'geo_mean':geo_mean,
+            'median':np.median,
+            'min':np.min,
+            'max':np.max,
+        }
 
 
 
