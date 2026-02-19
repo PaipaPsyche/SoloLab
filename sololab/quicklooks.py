@@ -18,6 +18,7 @@ import matplotlib.colors as colors
 ## MATH
 
 import numpy as np
+import cdflib
 
 
 ## ASTROPY
@@ -100,6 +101,20 @@ def _parse_date(value, fmt=std_date_fmt):
             except ValueError:
                 pass
     raise ValueError(f"time data '{value}' does not match format '{fmt}'")
+
+def _coerce_time_data(time_data):
+    """Convert any time format to numpy.datetime64."""
+    arr = np.asarray(time_data)
+    if np.issubdtype(arr.dtype, np.datetime64):
+        return arr
+    if arr.dtype == object:
+        return arr.astype("datetime64[us]")
+    if np.issubdtype(arr.dtype, np.number):
+        return np.array(
+            cdflib.cdfepoch.to_datetime(arr), dtype="datetime64[us]"
+        )
+    return arr
+
 # SOLAR EVENTS CLASS
 class solar_event:
     def __init__(self,event_type,times,color=None,linestyle="-",linewidth=2,hl_alpha=0.4,paint_in=None,date_fmt=std_date_fmt):
@@ -815,8 +830,9 @@ def quicklook_plot(stix_counts=None,hfr_psd=None,tnr_psd=None,epd_data=None,epd_
         elif hfr_psd['level']=="L3":
             hfr_ylabel += rpw_y_units
         
-        min_times.append(np.min(copy_hfr["time"]))
-        max_times.append(np.max(copy_hfr["time"]))
+        hfr_time = _coerce_time_data(copy_hfr["time"])
+        min_times.append(_to_datetime(np.min(hfr_time)))
+        max_times.append(_to_datetime(np.max(hfr_time)))
 
         elements["hfr"] = copy_hfr
 
@@ -834,14 +850,16 @@ def quicklook_plot(stix_counts=None,hfr_psd=None,tnr_psd=None,epd_data=None,epd_
         elif tnr_psd['level']=="L3":
             tnr_ylabel += rpw_y_units
 
-        min_times.append(np.min(copy_tnr["time"]))
-        max_times.append(np.max(copy_tnr["time"]))
+        tnr_time = _coerce_time_data(copy_tnr["time"])
+        min_times.append(_to_datetime(np.min(tnr_time)))
+        max_times.append(_to_datetime(np.max(tnr_time)))
 
         elements["tnr"] = copy_tnr
 
     if 'stix' in display:
-        min_times.append(np.min(stix_counts["time"]))
-        max_times.append(np.max(stix_counts["time"]))
+        stix_time = _coerce_time_data(stix_counts["time"])
+        min_times.append(_to_datetime(np.min(stix_time)))
+        max_times.append(_to_datetime(np.max(stix_time)))
 
         elements["stix"] = copy_stix
     if 'epd' in display:

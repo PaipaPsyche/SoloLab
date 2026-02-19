@@ -55,10 +55,17 @@ def fit_func_gaussian(x,a,b,c,d):
     return (10**a) * np.exp(-(x-b)**2/( c**2)) + (10**d)
 
 def dt_to_sec_t0(time_data,t0=None):
+    def _to_seconds(delta):
+        if hasattr(delta, "seconds"):
+            return delta.seconds + delta.microseconds / 1e6
+        if isinstance(delta, np.timedelta64):
+            return delta / np.timedelta64(1, "s")
+        return delta
+    
     if(t0==None):
         t0=time_data[0]
     time_dts = [time_data[i]-t0 for i in range(len(time_data))]
-    t_0 = np.array([t.seconds + t.microseconds/1e6 for t in time_dts])
+    t_0 = np.array([_to_seconds(t) for t in time_dts])
 
     return [t_0,time_data[0]]
 
