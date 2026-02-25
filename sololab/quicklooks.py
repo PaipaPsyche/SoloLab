@@ -690,6 +690,7 @@ def stix_plot_counts(counts_dict,savename=None,
         ax.set_xlim(plot_time[0],plot_time[-1])
 
     ax.set_ylabel('STIX \n Count Rate [cts/sec]',fontsize=axis_fontsize)
+    ax.grid(True)
 
 
     return ax
