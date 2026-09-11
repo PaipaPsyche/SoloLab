@@ -11,10 +11,19 @@ import astropy.units as u
 import cdflib
 
 
-#os.environ["CDF_LIB"] = "~/Documents/cdfpy38/src/lib/"
-#os.environ["CDF_LIB"] = "~/Documents/cdf38/src/lib/"
-os.environ["CDF_LIB"] = "/home/dpaipa/Documents/cdf38/src/lib/"
-from spacepy import pycdf
+def _cdf_epoch_to_datetime(raw_epoch):
+    """Convert a raw CDF epoch array (CDF_EPOCH/CDF_EPOCH16/CDF_TIME_TT2000)
+    read via cdflib.varget() into an array of python datetime objects.
+
+    This mirrors what spacepy.pycdf did automatically on indexing, so all
+    downstream code (which expects datetime objects with .year / .seconds
+    on timedelta subtraction, etc.) keeps working unchanged.
+    """
+    raw_epoch = np.asarray(raw_epoch)
+    if raw_epoch.size == 0:
+        return raw_epoch
+    return np.array(cdflib.cdfepoch.to_datetime(raw_epoch), dtype=object)
+
 
 def _parse_date(value, fmt=std_date_fmt):
     if isinstance(value, datetime):
@@ -51,35 +60,34 @@ def _coerce_time_data(time_data):
 
 def rpw_read_tnr_cdf(filepath, sensor=4, start_index=0, end_index=-99, data_index=0):
 
-    with pycdf.CDF(filepath) as data_L2:
+    data_L2 = cdflib.CDF(filepath)
 
-        freq_tnr1 = np.append(
-            data_L2['TNR_BAND_FREQ'][0, :], data_L2['TNR_BAND_FREQ'][1, :]
+    band_freq = data_L2.varget('TNR_BAND_FREQ')
+    freq_tnr1 = np.append(band_freq[0, :], band_freq[1, :])
+    freq_tnr2 = np.append(band_freq[2, :], band_freq[3, :])
+    freq_tnr = np.append(freq_tnr1, freq_tnr2)
+    freq_tnr = freq_tnr / 1000.0  # frequency in kHz
+    nn = np.size(data_L2.varget('Epoch'))
+    if end_index == -99:
+        end_index = nn
+    epochdata = _cdf_epoch_to_datetime(
+        data_L2.varget('Epoch')[start_index:end_index]
+    )
+    sensor_config = np.transpose(
+        data_L2.varget('SENSOR_CONFIG')[start_index:end_index, :]
+    )
+    auto1_data = np.transpose(data_L2.varget('AUTO1')[start_index:end_index, :])
+    auto2_data = np.transpose(data_L2.varget('AUTO2')[start_index:end_index, :])
+    sweep_num = data_L2.varget('SWEEP_NUM')[start_index:end_index]
+    bande = data_L2.varget('TNR_BAND')[start_index:end_index]
+    if sensor == 7:
+        auto1_data = np.transpose(
+            data_L2.varget('MAGNETIC_SPECTRAL_POWER1')[start_index:end_index, :]
         )
-        freq_tnr2 = np.append(
-            data_L2['TNR_BAND_FREQ'][2, :], data_L2['TNR_BAND_FREQ'][3, :]
+        auto2_data = np.transpose(
+            data_L2.varget('MAGNETIC_SPECTRAL_POWER2')[start_index:end_index, :]
         )
-        freq_tnr = np.append(freq_tnr1, freq_tnr2)
-        freq_tnr = freq_tnr / 1000.0  # frequency in kHz
-        nn = np.size(data_L2['Epoch'][:])
-        if end_index == -99:
-            end_index = nn
-        epochdata = data_L2['Epoch'][start_index:end_index]
-        sensor_config = np.transpose(
-            data_L2['SENSOR_CONFIG'][start_index:end_index, :]
-        )
-        auto1_data = np.transpose(data_L2['AUTO1'][start_index:end_index, :])
-        auto2_data = np.transpose(data_L2['AUTO2'][start_index:end_index, :])
-        sweep_num = data_L2['SWEEP_NUM'][start_index:end_index]
-        bande = data_L2['TNR_BAND'][start_index:end_index]
-        if sensor == 7:
-            auto1_data = np.transpose(
-                data_L2['MAGNETIC_SPECTRAL_POWER1'][start_index:end_index, :]
-            )
-            auto2_data = np.transpose(
-                data_L2['MAGNETIC_SPECTRAL_POWER2'][start_index:end_index, :]
-            )
-        puntical = (data_L2['FRONT_END'][start_index:end_index] == 1).nonzero()
+    puntical = (data_L2.varget('FRONT_END')[start_index:end_index] == 1).nonzero()
     epochdata = epochdata[puntical[0]]
     sensor_config = sensor_config[:, puntical[0]]
     auto1_data = auto1_data[:, puntical[0]]
@@ -179,23 +187,25 @@ def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
 
     #import datetime
 
-    with pycdf.CDF ( filepath ) as l2_cdf_file:
+    l2_cdf_file = cdflib.CDF(filepath)
 
-        frequency = l2_cdf_file[ 'FREQUENCY' ][ : ]  # / 1000.0  # frequency in MHz
-        nn = np.size ( l2_cdf_file[ 'Epoch' ][ : ] )
-        if end_index == -99:
-            end_index = nn
-        frequency = frequency[ start_index:end_index ]
-        epochdata = l2_cdf_file[ 'Epoch' ][ start_index:end_index ]
-        sensor_config = np.transpose (
-            l2_cdf_file[ 'SENSOR_CONFIG' ][ start_index:end_index, : ]
-        )
-        agc1_data = np.transpose ( l2_cdf_file[ 'AGC1' ][ start_index:end_index ] )
-        agc2_data = np.transpose ( l2_cdf_file[ 'AGC2' ][ start_index:end_index ] )
-        sweep_num = l2_cdf_file[ 'SWEEP_NUM' ][ start_index:end_index ]
-        cal_points = (
-            l2_cdf_file[ 'FRONT_END' ][ start_index:end_index ] == 1
-        ).nonzero ()
+    frequency = l2_cdf_file.varget('FREQUENCY')  # / 1000.0  # frequency in MHz
+    nn = np.size(l2_cdf_file.varget('Epoch'))
+    if end_index == -99:
+        end_index = nn
+    frequency = frequency[start_index:end_index]
+    epochdata = _cdf_epoch_to_datetime(
+        l2_cdf_file.varget('Epoch')[start_index:end_index]
+    )
+    sensor_config = np.transpose(
+        l2_cdf_file.varget('SENSOR_CONFIG')[start_index:end_index, :]
+    )
+    agc1_data = np.transpose(l2_cdf_file.varget('AGC1')[start_index:end_index])
+    agc2_data = np.transpose(l2_cdf_file.varget('AGC2')[start_index:end_index])
+    sweep_num = l2_cdf_file.varget('SWEEP_NUM')[start_index:end_index]
+    cal_points = (
+        l2_cdf_file.varget('FRONT_END')[start_index:end_index] == 1
+    ).nonzero()
     frequency = frequency[ cal_points[ 0 ] ]
     epochdata = epochdata[ cal_points[ 0 ] ]
     sensor_config = sensor_config[ :, cal_points[ 0 ] ]
