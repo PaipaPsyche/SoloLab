@@ -1,0 +1,13 @@
+numpy
+scipy
+pandas
+astropy
+cdflib
+solo-epd-loader
+seaborn
+matplotlib
+dash
+dash-bootstrap-components
+plotly
+diskcache
+gunicorn
