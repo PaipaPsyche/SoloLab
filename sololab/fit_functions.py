@@ -144,7 +144,7 @@ def gauss_exp_mode(pars):
     return tpeak
 def gauss_exp_onset(pars):
     ton,toff,tpeak,A,b = pars
-    return tpeak - ton*np.sqrt(2*np.log10(2))
+    return tpeak - ton*np.sqrt(2*np.log(2))
 def gauss_exp_bkg(pars):
     ton,toff,tpeak,A,b = pars
     return b
@@ -181,7 +181,7 @@ def gauss_gauss_mode(pars):
     return tpeak
 def gauss_gauss_onset(pars):
     ton,toff,tpeak,A,b = pars
-    return tpeak - ton*np.sqrt(2*np.log10(2))
+    return tpeak - ton*np.sqrt(2*np.log(2))
 
 def gauss_gauss_bkg(pars):
     ton,toff,tpeak,A,b = pars

@@ -426,66 +426,6 @@ def rpw_plot_curves(rpw_psd,savename=None,
         return ax,zip(close_freqs,lcolor)
     else:
         return ax
-def rpw_plot_overlay(
-    rpw_psd,
-    freqs,
-    ax=None,
-    frequency_range=None,
-    date_range=None,
-    cmap="nipy_spectral",
-    rpw_units="wmhz",
-    linewidth=2,
-    smoothing_pts=5,
-    lcolor=None,
-    rpw_plot_bias=None,
-    rpw_guidelines=False,
-    rpw_invert_yaxis=True,
-    axis_fontsize=13,
-):
-    ax = ax if ax else plt.gca()
-
-    rpw_plot_psd(
-        rpw_psd,
-        xlabel=False,
-        frequency_range=frequency_range,
-        date_range=date_range,
-        cmap=cmap,
-        t_format="%H:%M",
-        ax=ax,
-        axis_fontsize=axis_fontsize,
-        rpw_cbar_units=rpw_units,
-    )
-
-    ax.yaxis.set_major_formatter(scaled_int_ax_formatter(scale=1 / 1000.0, out="formatter"))
-
-    ax2 = ax.twinx()
-    multip = round(5 * 10 ** np.interp(len(freqs), [2, 7], [3.5, 2]), -2) if rpw_plot_bias else None
-
-    _, fqcol = rpw_plot_curves(
-        rpw_psd,
-        freqs=freqs,
-        ax=ax2,
-        date_range=date_range,
-        lw=linewidth,
-        smoothing_pts=smoothing_pts,
-        lcolor=lcolor,
-        bias_multiplier=multip,
-        return_freq_col=True,
-    )
-
-    if rpw_guidelines:
-        for c_freq, c_col in fqcol:
-            ax.axhline(c_freq, color=c_col, lw=0.5)
-
-    if multip is not None:
-        ax2.get_yaxis().set_ticks([])
-        ax2.set_yticklabels([])
-
-    if rpw_invert_yaxis:
-        ax.invert_yaxis()
-
-    return ax
-
 def stix_plot_spectrogram(counts_dict,savename=None,colorbar=True,
                       xfmt=" %H:%M",title=None,cmap="jet",fill_nan=True,
                       date_range=None,energy_range=None,x_axis=False,ax=None,
@@ -698,51 +638,6 @@ def stix_plot_counts(counts_dict,savename=None,
 
 
 
-def stix_plot_overlay(
-    stix_counts,
-    ax=None,
-    energy_range=None,
-    date_range=None,
-    cmap="bone",
-    linewidth=2,
-    stix_smoothing_points=5,
-    stix_energy_bins=None,
-    stix_lcolor=None,
-    stix_spec_zlogscale=True,
-    stix_spec_ylogscale=False,
-    stix_curves_ylogscale=True,
-):
-    ax = ax if ax else plt.gca()
-
-    stix_plot_spectrogram(
-        stix_counts,
-        ax=ax,
-        cmap=cmap,
-        energy_range=energy_range,
-        date_range=date_range,
-        x_axis=True,
-        logscale=stix_spec_zlogscale,
-    )
-
-    if stix_spec_ylogscale:
-        ax.set_yscale("log")
-
-    ax2 = ax.twinx()
-    stix_plot_counts(
-        stix_counts,
-        smoothing_pts=stix_smoothing_points,
-        integrate_bins=stix_energy_bins,
-        lcolor=stix_lcolor,
-        ax=ax2,
-        lw=linewidth,
-        ylogscale=stix_curves_ylogscale,
-    )
-
-    return ax
-
-
-
-
 
 
 
@@ -768,8 +663,6 @@ def quicklook_plot(stix_counts=None,hfr_psd=None,tnr_psd=None,epd_data=None,epd_
     # array copies
     copy_hfr = None
     copy_tnr = None
-    copy_stix = None
-    copy_epd = None
     
     
     
@@ -862,9 +755,9 @@ def quicklook_plot(stix_counts=None,hfr_psd=None,tnr_psd=None,epd_data=None,epd_
         min_times.append(_to_datetime(np.min(stix_time)))
         max_times.append(_to_datetime(np.max(stix_time)))
 
-        elements["stix"] = copy_stix
+        elements["stix"] = stix_counts
     if 'epd' in display:
-        elements["epd"] = copy_epd
+        elements["epd"] = epd_data
 
 
     # determine time 
@@ -1585,8 +1478,35 @@ def plot_stix_rpw_epd(l1_cts,rpw_psd,ept_df,energies_ept,tnr_psd=None,energy_ran
         return fig
 
 
+def _epd_bin_text(energies_ept, particle, channel):
+    """energies_ept[f"{particle}_Bins_Text"][channel] -> the "<min> - <max>
+    MeV" label string for one channel. Defensive against a solo_epd_loader
+    shape difference between versions: some versions wrap the string in a
+    1-element array (need a trailing [0]), the version this app is
+    currently tested against returns the string directly - indexing [0] on
+    it in that case took its first CHARACTER, not the string, causing a
+    downstream IndexError on .split()."""
+    value = energies_ept[f"{particle}_Bins_Text"][channel]
+    if isinstance(value, str):
+        return value
+    return value[0]
+
+
+def _epd_resample_freq(resample):
+    """UI-facing resample label (e.g. "30sec") -> a pandas offset alias
+    ("30s"). Values already in pandas format (e.g. "1min") pass through
+    unchanged. None/empty disables resampling."""
+    if not resample:
+        return None
+    if resample.endswith("sec"):
+        return resample[:-3] + "s"
+    return resample
+
+
 def plot_ept_data(ept_df,energies_ept,ax,particle='Electron',channels=[0,4,8,16,22,26],
                   resample='20min',date_range=None,round_epd_label=True):
+    """`resample` bins the flux series to this cadence via pandas
+    `.resample(freq).mean()` before plotting (e.g. "1min", "30sec")."""
 
     ax = ax if ax else plt.gca()
     ax.set_prop_cycle('color', plt.cm.jet_r(np.linspace(0,1,7)))
@@ -1608,7 +1528,7 @@ def plot_ept_data(ept_df,energies_ept,ax,particle='Electron',channels=[0,4,8,16,
 
 
     for channel in channels:
-        leg_elems=energies_ept[f"{particle}_Bins_Text"][channel][0].split()
+        leg_elems=_epd_bin_text(energies_ept,particle,channel).split()
         to_round = 0 if round_epd_label else 2
         ktype = int if round_epd_label else float
         new_leg = f'{ktype(round(float(leg_elems[0])*1000,to_round))} - {ktype(round(float(leg_elems[2])*1000,to_round))} keV'
@@ -1616,10 +1536,11 @@ def plot_ept_data(ept_df,energies_ept,ax,particle='Electron',channels=[0,4,8,16,
 
 
         y =  ept_df[f'{particle}_Flux'][f'{particle}_Flux_{channel}']
-        x = ept_df.index
-        #print(len(x),len(y),"LEN")
-        #print(x,y)
-        ax.plot(x,smooth(y=y,pts=600),label = new_leg)
+        freq = _epd_resample_freq(resample)
+        if freq:
+            y = y.resample(freq).mean()
+        x = y.index
+        ax.plot(x,y,label = new_leg)
     ax.set_yscale('log')
     ax.set_ylabel("EPD - EPT \n Electron flux \n"+r"(cm$^2$ sr s MeV)$^{-1}$")
     ax.grid()

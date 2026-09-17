@@ -2,8 +2,8 @@ numpy==1.26.4
 scipy
 pandas
 matplotlib
+astropy
 sunpy==4.1.7
-spacepy
 solo-epd-loader
 cdflib
 seaborn

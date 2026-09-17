@@ -41,14 +41,14 @@ def stix_create_counts(pathfile, is_bkg=False,time_arr=None,date_range=None,corr
     # print elapsed time and distance from the sun
     try:
         print("  Obs. elapsed time: ",round((Time(header["DATE_END"])-Time(header["DATE_BEG"])).to(u.s).value/60,2),"minutes")
-    except:
+    except KeyError:
         print("  Obs. elapsed time: ",round((Time(header["DATE-END"])-Time(header["DATE-BEG"])).to(u.s).value/60,2),"minutes")
 
 
     try:
         dist_sun_sc=(header["DSUN_OBS"]*u.m).to(u.au)
         print(f"  Distance s/c - sun: {np.round(dist_sun_sc,3)}")
-    except:
+    except KeyError:
         dist_sun_sc=(header["DSUN-OBS"]*u.m).to(u.au)
         print(f"  Distance s/c - sun: {np.round(dist_sun_sc,3)}")
 

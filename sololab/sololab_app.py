@@ -1307,13 +1307,19 @@ class ImportRpwTnrDialog(QDialog):
         self.load_btn.setEnabled(True)  # Always enabled
         self.load_btn.clicked.connect(self._load_rpw_data)
         bkg_btn_layout.addWidget(self.load_btn)
-        
+
+        # Add Plot Background button
+        self.plot_bkg_btn = QPushButton("Plot Background")
+        self.plot_bkg_btn.setEnabled(False)
+        self.plot_bkg_btn.clicked.connect(self._plot_background)
+        bkg_btn_layout.addWidget(self.plot_bkg_btn)
+
         bkg_layout.addLayout(bkg_btn_layout)
-        
+
         # Connect radio buttons to enable/disable controls
         self.no_bkg_radio.toggled.connect(lambda: self._toggle_bkg_controls())
         self.bkg_time_radio.toggled.connect(lambda: self._toggle_bkg_controls())
-        
+
         layout.addWidget(bkg_group)
 
         # buttons
@@ -1465,11 +1471,37 @@ class ImportRpwTnrDialog(QDialog):
             # Store the processed data
             self.processed_rpw_data = processed_data
             
-            QMessageBox.information(self, "Background Preview", 
+            QMessageBox.information(self, "Background Preview",
                                   f"RPW-TNR data with background subtraction preview generated.\n\n{bkg_info}")
-            
+            self.plot_bkg_btn.setEnabled(True)
+
         except Exception as e:
             QMessageBox.critical(self, "Background Error", f"Error applying background subtraction:\n{str(e)}")
+
+
+    def _plot_background(self):
+        """Plot RPW-TNR background in a separate window"""
+        if not self.processed_rpw_data:
+            QMessageBox.warning(self, "No Background Data", "Please preview with background subtraction first.")
+            return
+
+        try:
+            # Create new figure for background plot
+            fig = plt.figure(figsize=(10, 4))
+            ax = fig.add_subplot(111)
+
+            # Plot background using sololab function
+            rpw_plot_bkg(self.processed_rpw_data, ax=ax)
+
+            # Set window title
+            fig.suptitle("RPW-TNR Background Plot", fontsize=12)
+
+            plt.tight_layout()
+            plt.show(block=False)  # Non-blocking
+
+        except Exception as e:
+            QMessageBox.critical(self, "Background Plot Error", f"Error plotting RPW-TNR background:\n{str(e)}")
+
 
     def _apply_background_subtraction(self):
         """Apply background subtraction to RPW-TNR data"""
@@ -1527,10 +1559,12 @@ class ImportRpwTnrDialog(QDialog):
                 # Load raw data
                 rpw_data = rpw_get_data(self.rpw_tnr_edit.text().strip())
                 self.processed_rpw_data = rpw_create_PSD(rpw_data, which_freqs="non_zero")
-            
+
+            if self.bkg_time_radio.isChecked():
+                self.plot_bkg_btn.setEnabled(True)
             # Accept the dialog with processed data
             self.accept()
-            
+
         except Exception as e:
             QMessageBox.critical(self, "Load Error", f"Error loading RPW-TNR data:\n{str(e)}")
 
@@ -1560,8 +1594,6 @@ class ImportRpwTnrDialog(QDialog):
         
         return result
 
-
-# ... ImportEpdDialog and PlotPrefsDialog classes remain the same ...
 
 class ImportEpdDialog(QDialog):
     def __init__(self, parent=None):
@@ -2048,8 +2080,8 @@ class EnergyRangeDialog(QDialog):
             max_energy = int(self.max_energy.text())
             
             # Validate range
-            if not (4 <= min_energy <= 150) or not (4 <= max_energy <= 150):
-                QMessageBox.warning(self, "Invalid Range", "Energy values must be between 4 and 150 keV.")
+            if not (stix_energy_range_min_kev <= min_energy <= stix_energy_range_max_kev) or not (stix_energy_range_min_kev <= max_energy <= stix_energy_range_max_kev):
+                QMessageBox.warning(self, "Invalid Range", f"Energy values must be between {stix_energy_range_min_kev} and {stix_energy_range_max_kev} keV.")
                 return
             
             if min_energy >= max_energy:
@@ -2465,15 +2497,15 @@ class PlotPrefsDialog(QDialog):
         energy_inputs_layout.addWidget(QLabel("  "))  # Indent
         energy_inputs_layout.addWidget(QLabel("From:"))
         self.stix_energy_min = QSpinBox()
-        self.stix_energy_min.setRange(4, 150)
-        self.stix_energy_min.setValue(4)
+        self.stix_energy_min.setRange(stix_energy_range_min_kev, stix_energy_range_max_kev)
+        self.stix_energy_min.setValue(stix_energy_range_min_kev)
         self.stix_energy_min.setSuffix(" keV")
         self.stix_energy_min.setEnabled(False)
         energy_inputs_layout.addWidget(self.stix_energy_min)
         
         energy_inputs_layout.addWidget(QLabel("to:"))
         self.stix_energy_max = QSpinBox()
-        self.stix_energy_max.setRange(4, 150)
+        self.stix_energy_max.setRange(stix_energy_range_min_kev, stix_energy_range_max_kev)
         self.stix_energy_max.setValue(28)
         self.stix_energy_max.setSuffix(" keV")
         self.stix_energy_max.setEnabled(False)
@@ -2833,7 +2865,7 @@ class PlotPrefsDialog(QDialog):
             try:
                 freq_min = float(self.freq_min.text())
                 freq_max = float(self.freq_max.text())
-                if 1 <= freq_min < freq_max <= 16400:
+                if rpw_freq_range_min_khz <= freq_min < freq_max <= rpw_freq_range_max_khz:
                     freq_range = [freq_min, freq_max]
             except ValueError:
                 pass  # Use default if invalid
@@ -3057,10 +3089,10 @@ class PlotPrefsDialog(QDialog):
                     try:
                         freq_min = float(self.freq_min.text())
                         freq_max = float(self.freq_max.text())
-                        if 1 <= freq_min < freq_max <= 16400:
+                        if rpw_freq_range_min_khz <= freq_min < freq_max <= rpw_freq_range_max_khz:
                             freq_range = [freq_min, freq_max]
                         else:
-                            QMessageBox.warning(self, "Invalid Range", "Frequency range must be between 1 and 16400 kHz, with min < max.")
+                            QMessageBox.warning(self, "Invalid Range", f"Frequency range must be between {rpw_freq_range_min_khz} and {rpw_freq_range_max_khz} kHz, with min < max.")
                             return
                     except ValueError:
                         QMessageBox.warning(self, "Invalid Input", "Please enter valid frequency values.")
@@ -3177,10 +3209,10 @@ class PlotPrefsDialog(QDialog):
                     try:
                         freq_min = float(self.freq_min.text())
                         freq_max = float(self.freq_max.text())
-                        if 1 <= freq_min < freq_max <= 16400:
+                        if rpw_freq_range_min_khz <= freq_min < freq_max <= rpw_freq_range_max_khz:
                             freq_range = [freq_min, freq_max]
                         else:
-                            QMessageBox.warning(self, "Invalid Range", "Frequency range must be between 1 and 16400 kHz, with min < max.")
+                            QMessageBox.warning(self, "Invalid Range", f"Frequency range must be between {rpw_freq_range_min_khz} and {rpw_freq_range_max_khz} kHz, with min < max.")
                             return
                     except ValueError:
                         QMessageBox.warning(self, "Invalid Input", "Please enter valid frequency values.")
@@ -3404,40 +3436,6 @@ class PlotPrefsDialog(QDialog):
         
 
 
-    # def get_values(self):
-    #     # Get frequency range
-    #     freq_range = None
-    #     if self.freq_range_checkbox.isChecked():
-    #         try:
-    #             freq_min = float(self.freq_min.text())
-    #             freq_max = float(self.freq_max.text())
-    #             if 1 <= freq_min < freq_max <= 16400:
-    #                 freq_range = [freq_min, freq_max]
-    #         except ValueError:
-    #             pass  # Use default if invalid
-        
-    #     return {
-    #         "stix": {
-    #             "type": self.stix_choice.currentText(),
-    #             "logy": stix_logy,
-    #             "logz": self.stix_logz.isChecked(),
-    #             "energy_ranges": self.stix_energy_ranges,
-    #             "energy_range": self.retrieve_stix_energy_range(),
-    #             "smoothing_points": self.stix_smoothing_spinbox.value(),
-    #         },
-    #         "rpw": {
-    #             "type": self.rpw_choice.currentText(),
-    #             "logy": rpw_logy,
-    #             "logz": self.rpw_logz.isChecked(),
-    #             "overlay": self.rpw_overlay_choice.currentText(),
-    #             "freq_range": freq_range,
-    #             "smoothing_points": self.rpw_smoothing_spinbox.value(),
-    #         },
-    #         "epd": {
-    #             "logy": self.epd_logy.isChecked(),
-    #             "selected_channels": self.epd_selected_channels
-    #         },
-    #     }
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -3579,7 +3577,6 @@ class MainWindow(QMainWindow):
             scaled = self._banner_pixmap.scaledToWidth(target_width, Qt.SmoothTransformation)
             self.banner_label.setPixmap(scaled)
 
-    # ... all the status update and import methods remain the same ...
     def _update_stix_status(self):
         """Update STIX status label with data information"""
         if self.stix_counts_data is not None:

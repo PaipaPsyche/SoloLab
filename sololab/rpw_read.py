@@ -98,7 +98,7 @@ def rpw_read_tnr_cdf(filepath, sensor=4, start_index=0, end_index=-99, data_inde
     timet=epochdata
     #deltasw = sweep_numo[ 1:: ] - sweep_numo[ 0:np.size ( sweep_numo ) - 1 ]
     deltasw = abs (np.double(sweep_numo[ 1::]) - np.double(sweep_numo[ 0:np.size(sweep_numo)-1 ]))
-    xdeltasw = np.where ( deltasw > 100 )
+    xdeltasw = np.where ( deltasw > rpw_sweep_reset_threshold )
     xdsw = np.size ( xdeltasw )
     if xdsw > 0:
         xdeltasw = np.append ( xdeltasw, np.size ( sweep_numo ) - 1 )
@@ -130,18 +130,9 @@ def rpw_read_tnr_cdf(filepath, sensor=4, start_index=0, end_index=-99, data_inde
             sens = sens1
             timet_ici = timet[ sens1 ]
         if (np.size(sens0) == 0 and np.size(sens1) == 0):
-            print('no data at all ?!?')
-            V = (128, 128)
-            V = np.zeros ( V ) + 1.0
-            time = np.zeros ( 128 )
-            sweepn_TNR = 0.0
-            return {
-                'voltage': V,
-                'time': time,
-                'frequency': freq_tnr,
-                'sweep': sweepn_TNR,
-                'sensor': sensor,
-            }
+            raise ValueError(
+                f"rpw_read_tnr_cdf: no TNR data found for sensor {sensor} in {filepath}."
+            )
     ord_time = np.argsort ( timet_ici )
     timerr = timet_ici[ ord_time ]
     sens = sens[ ord_time ]
@@ -217,7 +208,7 @@ def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
 
     # deltasw = sweep_numo[ 1:: ] - sweep_numo[ 0:np.size ( sweep_numo ) - 1 ]
     deltasw = abs ( np.double ( sweep_numo[ 1:: ] ) - np.double ( sweep_numo[ 0:np.size ( sweep_numo ) - 1 ] ) )
-    xdeltasw = np.where ( deltasw > 100 )
+    xdeltasw = np.where ( deltasw > rpw_sweep_reset_threshold )
     xdsw = np.size ( xdeltasw )
     if xdsw > 0:
         xdeltasw = np.append ( xdeltasw, np.size ( sweep_numo ) - 1 )
@@ -254,18 +245,9 @@ def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
             sens = sens1
             timet_ici = timet[ sens1 ]
         if (np.size ( sens0 ) == 0 and np.size ( sens1 ) == 0):
-            print('  no data at all ?!?')
-            V = (321)
-            V = np.zeros ( V ) + 1.0
-            time = np.zeros ( 128 )
-            sweepn_HFR = 0.0
-    #           return {
-    #               'voltage': V,
-    #               'time': time,
-    #               'frequency': frequency,
-    #               'sweep': sweepn_HFR,
-    #               'sensor': sensor,
-    #           }
+            raise ValueError(
+                f"rpw_read_hfr_cdf: no HFR data found for sensor {sensor} in {filepath}."
+            )
     ord_time = np.argsort ( timet_ici )
     timerr = timet_ici[ ord_time ]
     sens = sens[ ord_time ]
@@ -282,7 +264,7 @@ def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
     time = 0.0
     sweepn_HFR = 0.0
     # ind_freq = [(frequency - 0.375) / 0.05]
-    ind_freq = [ (frequency - 375.) / 50. ]
+    ind_freq = [ (frequency - rpw_hfr_freq_min_khz) / rpw_hfr_freq_step_khz ]
     ind_freq = np.squeeze ( ind_freq )
     ind_freq = ind_freq.astype ( int )
     for ind_sweep in range ( minsweep, maxsweep + 1 ):
@@ -626,6 +608,11 @@ def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_i
         mn_bkg = np.array([mn_bkg for i in range(np.shape(z_axis)[1])]).T
         mn_bkg = mn_bkg.clip(0,np.inf)
 
+        # Floor is 1e-16 here (L2, raw PSD in V^2/Hz) vs 1 in the L3 branch
+        # below (flux in SFU) - intentional, not a copy-paste bug: the two
+        # levels are in different physical units with very different
+        # dynamic ranges, so the same floor value wouldn't make sense for
+        # both. Confirmed with the maintainer 2026-09-17.
         z_axis=np.clip(z_axis-mn_bkg,1e-16,np.inf)
 
         print("  bkg done.")
