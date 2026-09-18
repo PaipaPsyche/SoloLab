@@ -3,7 +3,7 @@ scipy
 pandas
 astropy
 cdflib
-solo-epd-loader
+solo-epd-loader>=0.4.4,<0.5  # EPD energy-bin label shape changed between versions before 0.4.4 (see sololab.dash_app.plotting.epd_bin_text); test before widening this range
 seaborn
 matplotlib
 dash

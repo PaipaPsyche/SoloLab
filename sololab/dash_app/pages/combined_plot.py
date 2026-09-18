@@ -10,6 +10,7 @@ pre-filled reactively with the intersection of the selected instruments'
 time ranges (max of the starts, min of the ends - the widest range a
 combined plot can meaningfully cover), per explicit user request.
 """
+import logging
 from datetime import datetime
 
 import dash
@@ -21,6 +22,8 @@ from sololab.dash_app import plotting
 from sololab.dash_app.constants import INSTRUMENT_ORDER, rpw_key
 from sololab.dash_app.session_store import session_store
 from sololab.dash_app.utils import format_dt_input, parse_dt_input
+
+logger = logging.getLogger(__name__)
 
 dash.register_page(__name__, path="/combined-plot", name="Combined Plot")
 
@@ -230,4 +233,5 @@ def render_combined_plot(n_clicks, display, date_range_enabled, date_start, date
         )
         return fig, "", "success", False
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, str(exc), "danger", True

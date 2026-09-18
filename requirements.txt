@@ -4,8 +4,9 @@ pandas
 matplotlib
 astropy
 sunpy==4.1.7
-solo-epd-loader
+solo-epd-loader>=0.4.4,<0.5  # EPD energy-bin label shape changed between versions before 0.4.4 (see sololab.quicklooks._epd_bin_text); test before widening this range
 cdflib
+stixdcpy  # optional: only needed for sololab.stix_read.stix_query_science_files/stix_download_file (download from the STIX Data Center)
 seaborn
 qtpy
 PyQt5

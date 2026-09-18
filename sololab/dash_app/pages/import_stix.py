@@ -6,6 +6,9 @@ and the Upload -> bytes -> session_store -> tempfile -> stix_read.* ->
 plotting.* -> dcc.Graph pattern reused (via rpw_import_factory.py) by the
 RPW-HFR/TNR pages.
 """
+import contextlib
+import logging
+
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, dcc, html
@@ -16,12 +19,14 @@ from sololab.dash_app import plotting
 from sololab.dash_app.constants import STIX_POLL_DEFAULT, STIX_POLL_OPTIONS
 from sololab.dash_app.session_store import session_store
 from sololab.dash_app.utils import (
-    bytes_to_tempfile,
     decode_upload,
     format_dt_input,
     parse_dt_input,
+    tempfile_from_bytes,
     to_stix_date_str,
 )
+
+logger = logging.getLogger(__name__)
 
 dash.register_page(__name__, path="/import/stix", name="Import STIX")
 
@@ -206,20 +211,21 @@ def _compute_stix_counts(sid, bkg_file_enabled, bkg_time_enabled, bkg_start, bkg
     _load_stix_data. Always rereads the main file from cached bytes,
     matching the original's no-memoization behaviour."""
     filename, data = session_store.get(sid, "stix_file_bytes")
-    path = bytes_to_tempfile(data, filename)
+    with contextlib.ExitStack() as stack:
+        path = stack.enter_context(tempfile_from_bytes(data, filename))
 
-    if not bkg_file_enabled and not bkg_time_enabled:
-        return stix_read.stix_create_counts(path)
+        if not bkg_file_enabled and not bkg_time_enabled:
+            return stix_read.stix_create_counts(path)
 
-    kwargs = {"energy_shift": 0, "bkg_poll_function": poll}
-    if bkg_file_enabled:
-        bkg_filename, bkg_data = session_store.get(sid, "stix_bkg_file_bytes")
-        kwargs["pathbkg"] = bytes_to_tempfile(bkg_data, bkg_filename)
-    if bkg_time_enabled:
-        start = parse_dt_input(bkg_start)
-        end = parse_dt_input(bkg_end)
-        kwargs["stix_bkg_range"] = (to_stix_date_str(start), to_stix_date_str(end))
-    return stix_read.stix_remove_bkg_counts(path, **kwargs)
+        kwargs = {"energy_shift": 0, "bkg_poll_function": poll}
+        if bkg_file_enabled:
+            bkg_filename, bkg_data = session_store.get(sid, "stix_bkg_file_bytes")
+            kwargs["pathbkg"] = stack.enter_context(tempfile_from_bytes(bkg_data, bkg_filename))
+        if bkg_time_enabled:
+            start = parse_dt_input(bkg_start)
+            end = parse_dt_input(bkg_end)
+            kwargs["stix_bkg_range"] = (to_stix_date_str(start), to_stix_date_str(end))
+        return stix_read.stix_remove_bkg_counts(path, **kwargs)
 
 
 @callback(
@@ -238,14 +244,15 @@ def stix_preview(n_clicks, sid):
         raise PreventUpdate
     try:
         filename, data = session_store.get(sid, "stix_file_bytes")
-        path = bytes_to_tempfile(data, filename)
-        counts = stix_read.stix_create_counts(path)
+        with tempfile_from_bytes(data, filename) as path:
+            counts = stix_read.stix_create_counts(path)
         session_store.set(sid, "stix_counts_final", counts)
         fig = plotting.stix_spectrogram_figure(counts)
         start_str = format_dt_input(min(counts["time"]))
         end_str = format_dt_input(max(counts["time"]))
         return fig, start_str, end_str, "", "success", False
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, dash.no_update, dash.no_update, str(exc), "danger", True
 
 
@@ -280,6 +287,7 @@ def stix_preview_with_bkg(n_clicks, bkg_file_enabled, bkg_time_enabled, bkg_star
         has_bkg = "background" in counts
         return fig, not has_bkg, "", "success", False
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, dash.no_update, str(exc), "danger", True
 
 
@@ -336,4 +344,5 @@ def stix_load(n_clicks, bkg_file_enabled, bkg_time_enabled, bkg_start, bkg_end, 
         }
         return status, "STIX data loaded.", "success", True
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, str(exc), "danger", True

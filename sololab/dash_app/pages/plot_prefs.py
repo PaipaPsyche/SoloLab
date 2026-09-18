@@ -7,6 +7,8 @@ unlike the desktop dialog - see the migration plan's decision 8). Three
 editable-list modals (STIX energy-integration bins, RPW frequencies shared
 between HFR/TNR, EPD channels) reuse utils.make_list_editor_modal.
 """
+import logging
+
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, dcc, html
@@ -23,6 +25,8 @@ from sololab.dash_app.constants import (
 )
 from sololab.dash_app.session_store import session_store
 from sololab.dash_app.utils import make_list_editor_modal, register_list_editor_add_row_callback
+
+logger = logging.getLogger(__name__)
 
 dash.register_page(__name__, path="/plot-prefs", name="Plot Preferences")
 
@@ -534,6 +538,7 @@ def stix_prefs_preview(n_clicks, prefs, sid):
             )
         return fig, "", "success", False
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, str(exc), "danger", True
 
 
@@ -603,6 +608,7 @@ def rpw_prefs_preview(n_hfr, n_tnr, prefs, sid):
             )
         return fig, "", "success", False
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, str(exc), "danger", True
 
 
@@ -658,4 +664,5 @@ def epd_prefs_preview(n_clicks, prefs, sid):
         )
         return fig, "", "success", False
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, str(exc), "danger", True

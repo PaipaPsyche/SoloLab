@@ -9,9 +9,68 @@ from astropy.io import fits
 from astropy.time.core import Time, TimeDelta
 from astropy.table import Table
 import astropy.units as u
-import astropy.constants as cs
 
  # STIX data read
+
+# --- STIX Data Center download (optional dependency: stixdcpy) ---------------------
+#
+# `stixdcpy` is imported lazily inside these two functions, not at module
+# level: it's an optional feature (not needed to read a STIX file you
+# already have), so the rest of sololab keeps working without it installed.
+# `pip install stixdcpy` to use these.
+
+# Only these two product types map to a FITS shape stix_create_counts can
+# actually parse (spectrogram vs. summed-over-pixels L1 data, matching its
+# own `spectrogram_file = "spe" in basename(pathfile)` detection). Other
+# STIX Data Center product types (housekeeping, quicklook, ...) have a
+# different FITS structure and would fail if fed into stix_create_counts.
+STIX_DOWNLOADABLE_PRODUCT_TYPES = {
+    "xray-spec": "Spectrogram",
+    "xray-l1": "L1 pixel data",
+}
+
+
+def stix_query_science_files(start, end, product_type="xray-spec", level="L1A"):
+    """Query the STIX Data Center (datacenter.stix.i4ds.net) for science FITS
+    files covering [start, end], without downloading anything.
+
+    start, end: anything stixdcpy accepts (e.g. "2022-12-25T00:00:00" or a
+    datetime). product_type: one of STIX_DOWNLOADABLE_PRODUCT_TYPES' keys.
+    level: processing level, e.g. "L1A" (near-real-time) or "L1" (final).
+
+    Returns a list of dicts (one per matching file - a single day commonly
+    has several, each covering a different sub-window): file_id, url,
+    observation_time_range, product_type, level, duration, etc. Empty list
+    if nothing matches.
+    """
+    try:
+        import stixdcpy.net as stixdcpy_net
+    except ImportError as exc:
+        raise ImportError(
+            "Downloading STIX data requires the optional 'stixdcpy' package: pip install stixdcpy"
+        ) from exc
+    result = stixdcpy_net.FitsQuery.query(start, end, product_type=product_type, level=level)
+    return list(result.result)
+
+
+def stix_download_file(file_id, download_dir):
+    """Download one STIX FITS file (file_id from stix_query_science_files)
+    from the STIX Data Center into download_dir. Returns the local file
+    path. If the file is already present in download_dir, stixdcpy reuses
+    it instead of re-downloading."""
+    try:
+        import stixdcpy.net as stixdcpy_net
+    except ImportError as exc:
+        raise ImportError(
+            "Downloading STIX data requires the optional 'stixdcpy' package: pip install stixdcpy"
+        ) from exc
+    os.makedirs(download_dir, exist_ok=True)
+    stixdcpy_net.FitsQuery.download_location = download_dir
+    path = stixdcpy_net.FitsQuery.get_fits(file_id, progress_bar=False)
+    if not path:
+        raise RuntimeError(f"Download failed for STIX file_id={file_id} (server returned no data).")
+    return path
+
 
 def stix_create_counts(pathfile, is_bkg=False,time_arr=None,date_range=None,correct_flight_time=False,energy_shift=0):
 

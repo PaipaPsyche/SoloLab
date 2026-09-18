@@ -10,6 +10,8 @@ lines per instrument. Unlike the original PyQt5 app (where only HFR has a
 "Plot Background" button), this port adds it to TNR too for consistency -
 an intentional deviation confirmed with the user.
 """
+import logging
+
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, dcc, html
@@ -19,7 +21,9 @@ from sololab import rpw_read
 from sololab.dash_app import plotting
 from sololab.dash_app.constants import RPW_POLL_DEFAULT, RPW_POLL_OPTIONS, rpw_key
 from sololab.dash_app.session_store import session_store
-from sololab.dash_app.utils import bytes_to_tempfile, decode_upload, format_dt_input, parse_dt_input
+from sololab.dash_app.utils import decode_upload, format_dt_input, parse_dt_input, tempfile_from_bytes
+
+logger = logging.getLogger(__name__)
 
 PREVIEW_FREQUENCY_RANGE = [0, 17000]
 
@@ -139,14 +143,14 @@ def register_rpw_import_callbacks(data_type):
 
     def _load_psd(sid):
         filename, data = session_store.get(sid, rpw_key(data_type, "file_bytes"))
-        path = bytes_to_tempfile(data, filename)
-        rpw_data = rpw_read.rpw_get_data(path)
+        with tempfile_from_bytes(data, filename) as path:
+            rpw_data = rpw_read.rpw_get_data(path)
         return rpw_read.rpw_create_PSD(rpw_data, which_freqs="non_zero")
 
     def _load_psd_with_bkg(sid, bkg_start, bkg_end, poll):
         filename, data = session_store.get(sid, rpw_key(data_type, "file_bytes"))
-        path = bytes_to_tempfile(data, filename)
-        rpw_data = rpw_read.rpw_get_data(path)
+        with tempfile_from_bytes(data, filename) as path:
+            rpw_data = rpw_read.rpw_get_data(path)
         start = parse_dt_input(bkg_start)
         end = parse_dt_input(bkg_end)
         return rpw_read.rpw_create_PSD(
@@ -198,6 +202,7 @@ def register_rpw_import_callbacks(data_type):
             end_str = format_dt_input(max(psd["time"]))
             return fig, start_str, end_str, "", "success", False
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Unhandled error in callback")
             return dash.no_update, dash.no_update, dash.no_update, str(exc), "danger", True
 
     @callback(
@@ -226,6 +231,7 @@ def register_rpw_import_callbacks(data_type):
             fig.add_vline(x=end, line_color="red")
             return fig, False, "", "success", False
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Unhandled error in callback")
             return dash.no_update, dash.no_update, str(exc), "danger", True
 
     @callback(
@@ -274,4 +280,5 @@ def register_rpw_import_callbacks(data_type):
             }
             return status, f"{data_type.upper()} data loaded.", "success", True
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Unhandled error in callback")
             return dash.no_update, str(exc), "danger", True

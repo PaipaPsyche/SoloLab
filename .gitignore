@@ -8,3 +8,6 @@ sololab/dash_app/.epd_cache/
 
 # Scratch scripts used only for local testing
 .scratch/
+
+# Desktop app runtime log (created automatically, per-machine)
+sololab/sololab_app.log
