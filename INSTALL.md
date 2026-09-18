@@ -232,6 +232,11 @@ first, it's not included by default since the web app doesn't need it).
   `sololab/__init__.py` catches this automatically. If you see this error
   from the *desktop* app instead, you installed `requirements-dash.txt`
   there by mistake - use `requirements.txt`.
+- **`SunpyUserWarning: Importing sunpy.timeseries without its extra dependencies...`** when
+  starting either app - harmless (the app still runs), but easy to silence: it's `solo-epd-loader`
+  importing `sunpy.io._cdf` at startup, which wants `h5py` even though `sololab` itself never uses
+  `sunpy` directly. `pip install h5py` fixes it; both requirements files already include it, so a
+  fresh install from `requirements.txt`/`requirements-dash.txt` shouldn't hit this at all.
 - **"Downloading STIX data requires the optional 'stixdcpy' package"** - only
   shown if you click "Download from STIX Data Center..." without `stixdcpy`
   installed (e.g. `pip install -r requirements.txt` ran before it was added,
