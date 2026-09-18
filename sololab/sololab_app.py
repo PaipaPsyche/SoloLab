@@ -1,4 +1,6 @@
 import sys
+import os
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 import pickle
@@ -66,6 +68,66 @@ from qtpy.QtWidgets import (
     QListWidget,
     QListWidgetItem,
 )
+
+# Every dialog's `except Exception as e:` blocks show the error in a
+# QMessageBox and, until now, nowhere else - on a packaged/no-console
+# build the stray print() statements elsewhere in this file are invisible,
+# so real errors left no trace at all. Logs to both the console (when run
+# from a terminal) and a file next to this script (so it's captured even
+# without one). SOLOLAB_LOG_LEVEL env var overrides the default (INFO).
+_log_path = Path(__file__).resolve().parent / "sololab_app.log"
+logging.basicConfig(
+    level=os.environ.get("SOLOLAB_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler(_log_path, encoding="utf-8")],
+)
+logger = logging.getLogger(__name__)
+
+# Lightweight visual nudge toward the next step in an import dialog: "Preview"
+# is highlighted once a file is selected, "LOAD" once that file has actually
+# been previewed - both were already enabled at that point, just easy to miss
+# among the other controls.
+_NEXT_STEP_BUTTON_STYLE = "background-color: #dff0d8; font-weight: bold; border: 1px solid #3c763d;"
+
+
+def _to_py_datetime(value):
+    """Coerce a numpy.datetime64 or pandas.Timestamp (what sololab's various
+    read functions - rpw_read.py's numpy arrays, EPD's pandas DataFrame
+    index - actually hand back) to a plain python datetime, so values coming
+    from different data structures can be compared with plain min()/max()
+    without type-mismatch surprises. Passes through anything else unchanged
+    (e.g. an already-plain datetime)."""
+    if isinstance(value, np.datetime64):
+        return value.astype("datetime64[us]").item()
+    if hasattr(value, "to_pydatetime"):
+        return value.to_pydatetime()
+    return value
+
+
+def _time_value_to_qdatetime(value):
+    """Coerce a time value from sololab's read functions (a python datetime,
+    a numpy.datetime64/pandas.Timestamp, or a date string) into a QDateTime,
+    for prefilling a date/time picker from a loaded file's real time range.
+    Falls back to the current time only if the value truly can't be
+    interpreted.
+
+    Previously duplicated ad hoc in three places (STIX/RPW-HFR/RPW-TNR
+    preview), each missing the numpy.datetime64 case - rpw_create_PSD's
+    'time' arrays are numpy.datetime64, which has no .year attribute, so
+    those two silently fell through to "now" instead of the file's actual
+    range.
+    """
+    value = _to_py_datetime(value)
+    if hasattr(value, "year"):
+        return QDateTime(value)
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%d-%b-%Y %H:%M:%S"):
+            try:
+                return QDateTime(datetime.strptime(value, fmt))
+            except ValueError:
+                continue
+    logger.warning("Could not interpret time value %r for a date picker; defaulting to now", value)
+    return QDateTime.currentDateTime()
 
 
 class InstrumentSelectionDialog(QDialog):
@@ -150,6 +212,11 @@ class CombinedPlotDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Combined plot")
         self.resize(500, 320)
+        # Window-modal (blocks only this dialog's own parent chain) instead of the
+        # Qt default application-modal for exec_() - otherwise the plot window this
+        # dialog opens (an unrelated top-level window from matplotlib/pyplot) is
+        # blocked from accepting any input until this dialog itself is closed.
+        self.setWindowModality(Qt.WindowModal)
 
         self.prefs_dialog = prefs_dialog
         self.main_window = prefs_dialog.parent if prefs_dialog else None
@@ -225,6 +292,7 @@ class CombinedPlotDialog(QDialog):
         if dlg.exec_() == QDialog.Accepted:
             self.display_instruments = dlg.get_selected_instruments()
             self._update_display_label()
+            self._update_date_range_defaults()
 
     def _update_display_label(self):
         if self.display_instruments:
@@ -240,6 +308,48 @@ class CombinedPlotDialog(QDialog):
             "EPD": "epd",
         }
         return [mapping[name] for name in self.display_instruments if name in mapping]
+
+    def _instrument_time_bounds(self, key):
+        """Return (min, max) python datetimes for one selected instrument's
+        loaded data, or None if that instrument has no data (or its time
+        bounds can't be read)."""
+        if not self.main_window:
+            return None
+        try:
+            if key == "stix" and self.main_window.stix_counts_data is not None:
+                t = self.main_window.stix_counts_data["time"]
+                return _to_py_datetime(t.min()), _to_py_datetime(t.max())
+            if key == "hfr" and self.main_window.rpw_hfr_data is not None:
+                t = self.main_window.rpw_hfr_data["time"]
+                return _to_py_datetime(t.min()), _to_py_datetime(t.max())
+            if key == "tnr" and self.main_window.rpw_tnr_data is not None:
+                t = self.main_window.rpw_tnr_data["time"]
+                return _to_py_datetime(t.min()), _to_py_datetime(t.max())
+            if key == "epd":
+                epd_df = (
+                    self.main_window.df_electrons_ept
+                    if self.main_window.epd_particle == "Electron"
+                    else self.main_window.df_protons_ept
+                )
+                if epd_df is not None and len(epd_df.index) > 0:
+                    return _to_py_datetime(epd_df.index.min()), _to_py_datetime(epd_df.index.max())
+        except Exception:
+            logger.exception("Unhandled error computing time bounds for %s", key)
+        return None
+
+    def _update_date_range_defaults(self):
+        """Default the date-range pickers to the overlap of all selected,
+        loaded instruments' time coverage: the latest of their start times
+        to the earliest of their end times - the only window where a
+        combined plot of all of them actually has data from every
+        instrument. Recomputed each time the instrument selection changes."""
+        bounds = [b for b in (self._instrument_time_bounds(key) for key in self.retrieve_display_plots()) if b]
+        if not bounds:
+            return
+        combined_min = max(b[0] for b in bounds)
+        combined_max = min(b[1] for b in bounds)
+        self.date_start.setDateTime(_time_value_to_qdatetime(combined_min))
+        self.date_end.setDateTime(_time_value_to_qdatetime(combined_max))
 
     def _get_date_range(self):
         if not self.date_range_checkbox.isChecked():
@@ -326,7 +436,7 @@ class CombinedPlotDialog(QDialog):
         date_range = self._get_date_range()
 
         try:
-            quicklook_plot(
+            fig = quicklook_plot(
                 stix_counts=self.main_window.stix_counts_data,
                 hfr_psd=self.main_window.rpw_hfr_data,
                 tnr_psd=self.main_window.rpw_tnr_data,
@@ -369,17 +479,148 @@ class CombinedPlotDialog(QDialog):
                 linewidth=self.linewidth_spin.value(),
                 savename=None,
             )
+            fig.canvas.draw()
             plt.show(block=False)
             self.accept()
         except Exception as exc:
             QMessageBox.critical(self, "Plot Error", f"Error generating combined plot:\n{exc}")
+
+class DownloadStixDataDialog(QDialog):
+    """Query the STIX Data Center (datacenter.stix.i4ds.net) for science
+    files in a date range and download one to a chosen directory, so the
+    user doesn't have to find/download a file manually before using
+    ImportStixDialog. Requires the optional `stixdcpy` package."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Download STIX data")
+        self.resize(650, 550)
+
+        self.downloaded_path = None
+        self._results = []
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+
+        now = QDateTime.currentDateTime()
+        self.start_datetime = QDateTimeEdit(now.addDays(-1))
+        self.start_datetime.setCalendarPopup(True)
+        self.start_datetime.setDisplayFormat("yyyy-MM-dd hh:mm:ss")
+        form.addRow("From:", self.start_datetime)
+
+        self.end_datetime = QDateTimeEdit(now)
+        self.end_datetime.setCalendarPopup(True)
+        self.end_datetime.setDisplayFormat("yyyy-MM-dd hh:mm:ss")
+        form.addRow("To:", self.end_datetime)
+
+        self.product_combo = QComboBox()
+        for key, label in STIX_DOWNLOADABLE_PRODUCT_TYPES.items():
+            self.product_combo.addItem(f"{label} ({key})", key)
+        form.addRow("Product type:", self.product_combo)
+
+        layout.addLayout(form)
+
+        search_layout = QHBoxLayout()
+        self.search_btn = QPushButton("Search")
+        self.search_btn.clicked.connect(self._search)
+        search_layout.addWidget(self.search_btn)
+        layout.addLayout(search_layout)
+
+        self.results_list = QListWidget()
+        self.results_list.itemSelectionChanged.connect(self._on_selection_changed)
+        layout.addWidget(self.results_list)
+
+        dest_layout = QHBoxLayout()
+        self.dest_edit = QLineEdit()
+        self.dest_edit.textChanged.connect(self._on_selection_changed)
+        dest_btn = QPushButton("Browse...")
+        dest_btn.clicked.connect(self._browse_dest)
+        dest_layout.addWidget(QLabel("Download to:"))
+        dest_layout.addWidget(self.dest_edit)
+        dest_layout.addWidget(dest_btn)
+        layout.addLayout(dest_layout)
+
+        self.download_btn = QPushButton("Download")
+        self.download_btn.setEnabled(False)
+        self.download_btn.clicked.connect(self._download)
+        layout.addWidget(self.download_btn)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _search(self):
+        start = self.start_datetime.dateTime().toString("yyyy-MM-ddThh:mm:ss")
+        end = self.end_datetime.dateTime().toString("yyyy-MM-ddThh:mm:ss")
+        product_type = self.product_combo.currentData()
+
+        self.results_list.clear()
+        self._results = []
+        self._on_selection_changed()
+
+        try:
+            results = stix_query_science_files(start, end, product_type=product_type)
+        except ImportError as e:
+            QMessageBox.critical(self, "Missing dependency", str(e))
+            return
+        except Exception as e:
+            logger.exception("Unhandled error")
+            QMessageBox.critical(self, "Search Error", f"Error querying STIX Data Center:\n{str(e)}")
+            return
+
+        if not results:
+            QMessageBox.information(self, "No results", "No files found for this date range/product type.")
+            return
+
+        self._results = results
+        for r in results:
+            t0, t1 = r.get("observation_time_range", ["?", "?"])
+            item = QListWidgetItem(f"[{r.get('file_id')}] {t0} to {t1}  (level {r.get('level', '?')})")
+            item.setData(Qt.UserRole, r.get("file_id"))
+            self.results_list.addItem(item)
+
+    def _on_selection_changed(self):
+        self.download_btn.setEnabled(
+            bool(self.results_list.selectedItems()) and bool(self.dest_edit.text().strip())
+        )
+
+    def _browse_dest(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Download Directory")
+        if path:
+            self.dest_edit.setText(path)
+
+    def _download(self):
+        items = self.results_list.selectedItems()
+        dest_dir = self.dest_edit.text().strip()
+        if not items or not dest_dir:
+            return
+        file_id = items[0].data(Qt.UserRole)
+        try:
+            path = stix_download_file(file_id, dest_dir)
+        except ImportError as e:
+            QMessageBox.critical(self, "Missing dependency", str(e))
+            return
+        except Exception as e:
+            logger.exception("Unhandled error")
+            QMessageBox.critical(self, "Download Error", f"Error downloading STIX file:\n{str(e)}")
+            return
+
+        self.downloaded_path = path
+        QMessageBox.information(self, "Download complete", f"Downloaded to:\n{path}")
+        self.accept()
+
 
 class ImportStixDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Import STIX data")
         self.resize(800, 750)
-        
+        # Window-modal instead of the Qt default application-modal for exec_() -
+        # "Plot Background" opens an unrelated top-level matplotlib window, which
+        # application-modal would block from accepting input until this dialog closes.
+        self.setWindowModality(Qt.WindowModal)
+
         # Store the processed data
         self.stix_counts = None
         self.processed_stix_counts = None
@@ -393,15 +634,20 @@ class ImportStixDialog(QDialog):
         self.stix_edit = QLineEdit()
         stix_btn = QPushButton("Browse...")
         stix_btn.clicked.connect(lambda: self._browse(self.stix_edit))
-        
+
+        # Download from STIX Data Center button
+        download_stix_btn = QPushButton("Download from STIX Data Center...")
+        download_stix_btn.clicked.connect(self._open_download_dialog)
+
         # Preview button
         self.preview_btn = QPushButton("Preview Data")
         self.preview_btn.setEnabled(False)
         self.preview_btn.clicked.connect(self._preview_stix_data)
-        
+
         h1 = QHBoxLayout()
         h1.addWidget(self.stix_edit)
         h1.addWidget(stix_btn)
+        h1.addWidget(download_stix_btn)
         h1.addWidget(self.preview_btn)
         main_form.addRow("STIX spectrogram file:", h1)
         
@@ -516,13 +762,20 @@ class ImportStixDialog(QDialog):
         if path:
             line_edit.setText(path)
 
+    def _open_download_dialog(self):
+        dlg = DownloadStixDataDialog(self)
+        if dlg.exec_() == QDialog.Accepted and dlg.downloaded_path:
+            self.stix_edit.setText(dlg.downloaded_path)
+
     def _on_stix_file_changed(self):
         """Enable/disable preview button based on file path"""
         has_file = bool(self.stix_edit.text().strip())
         self.preview_btn.setEnabled(has_file)
         self.preview_bkg_btn.setEnabled(has_file)
         self.load_btn.setEnabled(has_file)
-        
+        self.preview_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE if has_file else "")
+        self.load_btn.setStyleSheet("")  # needs a fresh preview of the (possibly new) file first
+
         # Hide preview if file is changed/cleared
         if not has_file:
             self.preview_group.setVisible(False)
@@ -540,6 +793,7 @@ class ImportStixDialog(QDialog):
             # Call the preview function
             self._show_stix_preview(stix_file)
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error previewing STIX data:\n{str(e)}")
 
     def _show_stix_preview(self, filepath):
@@ -555,38 +809,11 @@ class ImportStixDialog(QDialog):
             min_time = self.stix_counts['time'][0]
             max_time = self.stix_counts['time'][-1]
             
-            # Auto-populate time range from data - convert datetime to QDateTime
-            if hasattr(min_time, 'year'):  # Check if it's already a datetime object
-                min_qdatetime = QDateTime(min_time)
-                max_qdatetime = QDateTime(max_time)
-            else:
-                # Handle case where times might be strings or other formats
-                try:
-                    from datetime import datetime
-                    if isinstance(min_time, str):
-                        # Try parsing different date formats
-                        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%d-%b-%Y %H:%M:%S"]:
-                            try:
-                                dt_min = datetime.strptime(min_time, fmt)
-                                dt_max = datetime.strptime(max_time, fmt)
-                                min_qdatetime = QDateTime(dt_min)
-                                max_qdatetime = QDateTime(dt_max)
-                                break
-                            except ValueError:
-                                continue
-                        else:
-                            # If no format worked, use current time as fallback
-                            min_qdatetime = QDateTime.currentDateTime()
-                            max_qdatetime = QDateTime.currentDateTime()
-                    else:
-                        # Try direct conversion
-                        min_qdatetime = QDateTime(min_time)
-                        max_qdatetime = QDateTime(max_time)
-                except:
-                    # Fallback to current time if all conversion attempts fail
-                    min_qdatetime = QDateTime.currentDateTime()
-                    max_qdatetime = QDateTime.currentDateTime()
-            
+            # Auto-populate time range from data - convert to QDateTime (handles
+            # python datetime, numpy.datetime64, and common date strings)
+            min_qdatetime = _time_value_to_qdatetime(min_time)
+            max_qdatetime = _time_value_to_qdatetime(max_time)
+
             # Set the datetime widgets with the data time range
             self.bkg_start_datetime.setDateTime(min_qdatetime)
             self.bkg_end_datetime.setDateTime(max_qdatetime)
@@ -604,13 +831,16 @@ class ImportStixDialog(QDialog):
             
             # Show the preview section
             self.preview_group.setVisible(True)
-            
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
+
             # Show success message with time range info
             time_info = f"Data time range: {min_time} to {max_time}"
-            QMessageBox.information(self, "Preview Generated", 
+            QMessageBox.information(self, "Preview Generated",
                                   f"STIX raw data preview loaded successfully.\n\nFile: {filepath.split('/')[-1]}\n{time_info}\n\nBackground time range has been set to data limits.")
             
         except Exception as e:
+            logger.exception("Unhandled error")
             # Hide preview section on error
             self.preview_group.setVisible(False)
             raise Exception(f"Failed to generate preview: {str(e)}")
@@ -658,12 +888,15 @@ class ImportStixDialog(QDialog):
             # Store the processed data
             self.processed_stix_counts = processed_counts
             
-            QMessageBox.information(self, "Background Preview", 
+            QMessageBox.information(self, "Background Preview",
                                   f"STIX data with background subtraction preview generated.\n\n{bkg_info}")
-            
+
             self.plot_bkg_btn.setEnabled(True)
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Error", f"Error applying background subtraction:\n{str(e)}")
 
     def _apply_background_subtraction(self):
@@ -746,9 +979,11 @@ class ImportStixDialog(QDialog):
             fig.suptitle("STIX Background Plot", fontsize=12)
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)  # Non-blocking
 
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Plot Error", f"Error plotting STIX background:\n{str(e)}")
 
     
@@ -774,6 +1009,7 @@ class ImportStixDialog(QDialog):
             self.accept()
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Load Error", f"Error loading STIX data:\n{str(e)}")
 
     def _toggle_bkg_controls(self):
@@ -805,12 +1041,131 @@ class ImportStixDialog(QDialog):
             result["bkg_end_datetime"] = self.bkg_end_datetime.dateTime().toPython()
         
         return result
+class DownloadRpwDataDialog(QDialog):
+    """Query the CDAWeb RPW-HFR/TNR L3 archive (cdaweb.gsfc.nasa.gov) for a
+    year's worth of daily files and download one to a chosen directory, so
+    the user doesn't have to find/download a file manually before using
+    ImportRpwHfrDialog/ImportRpwTnrDialog. RPW L3 files are daily, so no
+    time-of-day is needed - only a date, restricted to what CDAWeb actually
+    publishes (queried live, not guessed)."""
+
+    def __init__(self, data_type, parent=None):
+        super().__init__(parent)
+        self.data_type = data_type  # "hfr" or "tnr"
+        self.setWindowTitle(f"Download RPW-{data_type.upper()} data")
+        self.resize(600, 500)
+
+        self.downloaded_path = None
+        self._available_dates = {}
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        this_year = QDate.currentDate().year()
+        self.year_spin = QSpinBox()
+        self.year_spin.setRange(2020, this_year + 1)  # Solar Orbiter launched Feb 2020
+        self.year_spin.setValue(this_year)
+        form.addRow("Year:", self.year_spin)
+        layout.addLayout(form)
+
+        query_layout = QHBoxLayout()
+        self.query_btn = QPushButton("Query available dates")
+        self.query_btn.clicked.connect(self._query_dates)
+        query_layout.addWidget(self.query_btn)
+        layout.addLayout(query_layout)
+
+        self.results_list = QListWidget()
+        self.results_list.itemSelectionChanged.connect(self._on_selection_changed)
+        layout.addWidget(self.results_list)
+
+        dest_layout = QHBoxLayout()
+        self.dest_edit = QLineEdit()
+        self.dest_edit.textChanged.connect(self._on_selection_changed)
+        dest_btn = QPushButton("Browse...")
+        dest_btn.clicked.connect(self._browse_dest)
+        dest_layout.addWidget(QLabel("Download to:"))
+        dest_layout.addWidget(self.dest_edit)
+        dest_layout.addWidget(dest_btn)
+        layout.addLayout(dest_layout)
+
+        self.download_btn = QPushButton("Download")
+        self.download_btn.setEnabled(False)
+        self.download_btn.clicked.connect(self._download)
+        layout.addWidget(self.download_btn)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _query_dates(self):
+        year = self.year_spin.value()
+        self.results_list.clear()
+        self._available_dates = {}
+        self._on_selection_changed()
+
+        try:
+            self._available_dates = rpw_cdaweb_list_available_dates(self.data_type, year)
+        except Exception as e:
+            logger.exception("Unhandled error")
+            QMessageBox.critical(self, "Query Error", f"Error querying CDAWeb:\n{str(e)}")
+            return
+
+        if not self._available_dates:
+            QMessageBox.information(
+                self, "No results",
+                f"No RPW-{self.data_type.upper()} L3 files found for {year} on CDAWeb.",
+            )
+            return
+
+        for date in sorted(self._available_dates):
+            item = QListWidgetItem(date.strftime("%Y-%m-%d"))
+            item.setData(Qt.UserRole, date)
+            self.results_list.addItem(item)
+
+    def _on_selection_changed(self):
+        self.download_btn.setEnabled(
+            bool(self.results_list.selectedItems()) and bool(self.dest_edit.text().strip())
+        )
+
+    def _browse_dest(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Download Directory")
+        if path:
+            self.dest_edit.setText(path)
+
+    def _download(self):
+        items = self.results_list.selectedItems()
+        dest_dir = self.dest_edit.text().strip()
+        if not items or not dest_dir:
+            return
+        date = items[0].data(Qt.UserRole)
+        try:
+            path = rpw_download_cdaweb_file(date, self.data_type, dest_dir)
+        except FileNotFoundError as e:
+            QMessageBox.warning(self, "Download failed", str(e))
+            return
+        except Exception as e:
+            logger.exception("Unhandled error")
+            QMessageBox.critical(
+                self, "Download Error",
+                f"Error downloading RPW-{self.data_type.upper()} file:\n{str(e)}",
+            )
+            return
+
+        self.downloaded_path = path
+        QMessageBox.information(self, "Download complete", f"Downloaded to:\n{path}")
+        self.accept()
+
+
 class ImportRpwHfrDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Import RPW-HFR data")
         self.resize(800, 700)
-        
+        # Window-modal instead of the Qt default application-modal for exec_() -
+        # "Plot Background" opens an unrelated top-level matplotlib window, which
+        # application-modal would block from accepting input until this dialog closes.
+        self.setWindowModality(Qt.WindowModal)
+
         # Store the processed data
         self.rpw_data = None
         self.processed_rpw_data = None
@@ -824,15 +1179,20 @@ class ImportRpwHfrDialog(QDialog):
         self.rpw_hfr_edit = QLineEdit()
         hfr_btn = QPushButton("Browse...")
         hfr_btn.clicked.connect(lambda: self._browse(self.rpw_hfr_edit))
-        
+
+        # Download from CDAWeb button
+        download_rpw_btn = QPushButton("Download from CDAWeb...")
+        download_rpw_btn.clicked.connect(self._open_download_dialog)
+
         # Preview button
         self.preview_btn = QPushButton("Preview Data")
         self.preview_btn.setEnabled(False)
         self.preview_btn.clicked.connect(self._preview_rpw_data)
-        
+
         h2 = QHBoxLayout()
         h2.addWidget(self.rpw_hfr_edit)
         h2.addWidget(hfr_btn)
+        h2.addWidget(download_rpw_btn)
         h2.addWidget(self.preview_btn)
         main_form.addRow("RPW-HFR file:", h2)
         
@@ -936,12 +1296,19 @@ class ImportRpwHfrDialog(QDialog):
         if path:
             line_edit.setText(path)
 
+    def _open_download_dialog(self):
+        dlg = DownloadRpwDataDialog("hfr", self)
+        if dlg.exec_() == QDialog.Accepted and dlg.downloaded_path:
+            self.rpw_hfr_edit.setText(dlg.downloaded_path)
+
     def _on_file_changed(self):
         """Enable/disable buttons based on file path"""
         has_file = bool(self.rpw_hfr_edit.text().strip())
         self.preview_btn.setEnabled(has_file)
         self.preview_bkg_btn.setEnabled(has_file and self.bkg_time_radio.isChecked())
-        
+        self.preview_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE if has_file else "")
+        self.load_btn.setStyleSheet("")  # needs a fresh preview of the (possibly new) file first
+
         # Hide preview if file is changed/cleared
         if not has_file:
             self.preview_group.setVisible(False)
@@ -958,6 +1325,7 @@ class ImportRpwHfrDialog(QDialog):
         try:
             self._show_rpw_preview(rpw_file)
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error previewing RPW-HFR data:\n{str(e)}")
 
     
@@ -975,38 +1343,11 @@ class ImportRpwHfrDialog(QDialog):
             min_time = self.rpw_data['time'][0]
             max_time = self.rpw_data['time'][-1]
             
-            # Auto-populate time range from data - convert datetime to QDateTime
-            if hasattr(min_time, 'year'):  # Check if it's already a datetime object
-                min_qdatetime = QDateTime(min_time)
-                max_qdatetime = QDateTime(max_time)
-            else:
-                # Handle case where times might be strings or other formats
-                try:
-                    from datetime import datetime
-                    if isinstance(min_time, str):
-                        # Try parsing different date formats
-                        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%d-%b-%Y %H:%M:%S"]:
-                            try:
-                                dt_min = datetime.strptime(min_time, fmt)
-                                dt_max = datetime.strptime(max_time, fmt)
-                                min_qdatetime = QDateTime(dt_min)
-                                max_qdatetime = QDateTime(dt_max)
-                                break
-                            except ValueError:
-                                continue
-                        else:
-                            # If no format worked, use current time as fallback
-                            min_qdatetime = QDateTime.currentDateTime()
-                            max_qdatetime = QDateTime.currentDateTime()
-                    else:
-                        # Try direct conversion
-                        min_qdatetime = QDateTime(min_time)
-                        max_qdatetime = QDateTime(max_time)
-                except:
-                    # Fallback to current time if all conversion attempts fail
-                    min_qdatetime = QDateTime.currentDateTime()
-                    max_qdatetime = QDateTime.currentDateTime()
-            
+            # Auto-populate time range from data - convert to QDateTime (handles
+            # python datetime, numpy.datetime64, and common date strings)
+            min_qdatetime = _time_value_to_qdatetime(min_time)
+            max_qdatetime = _time_value_to_qdatetime(max_time)
+
             # Set the datetime widgets with the data time range
             self.bkg_start_datetime.setDateTime(min_qdatetime)
             self.bkg_end_datetime.setDateTime(max_qdatetime)
@@ -1025,13 +1366,16 @@ class ImportRpwHfrDialog(QDialog):
             
             # Show the preview section
             self.preview_group.setVisible(True)
-            
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
+
             # Show success message with time range info
             time_info = f"Data time range: {min_time} to {max_time}"
-            QMessageBox.information(self, "Preview Generated", 
+            QMessageBox.information(self, "Preview Generated",
                                   f"RPW-HFR raw data preview loaded successfully.\n\nFile: {filepath.split('/')[-1]}\n{time_info}\n\nBackground time range has been set to data limits.")
             
         except Exception as e:
+            logger.exception("Unhandled error")
             self.preview_group.setVisible(False)
             raise Exception(f"Failed to generate preview: {str(e)}")
 
@@ -1077,11 +1421,14 @@ class ImportRpwHfrDialog(QDialog):
             # Store the processed data
             self.processed_rpw_data = processed_data
             
-            QMessageBox.information(self, "Background Preview", 
+            QMessageBox.information(self, "Background Preview",
                                   f"RPW-HFR data with background subtraction preview generated.\n\n{bkg_info}")
             self.plot_bkg_btn.setEnabled(True)
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Error", f"Error applying background subtraction:\n{str(e)}")
     
     
@@ -1103,9 +1450,11 @@ class ImportRpwHfrDialog(QDialog):
             fig.suptitle("RPW-HFR Background Plot", fontsize=12)
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)  # Non-blocking
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Plot Error", f"Error plotting RPW-HFR background:\n{str(e)}")
 
 
@@ -1172,6 +1521,7 @@ class ImportRpwHfrDialog(QDialog):
             self.accept()
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Load Error", f"Error loading RPW-HFR data:\n{str(e)}")
 
     def _toggle_bkg_controls(self):
@@ -1206,7 +1556,11 @@ class ImportRpwTnrDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Import RPW-TNR data")
         self.resize(800, 700)
-        
+        # Window-modal instead of the Qt default application-modal for exec_() -
+        # "Plot Background" opens an unrelated top-level matplotlib window, which
+        # application-modal would block from accepting input until this dialog closes.
+        self.setWindowModality(Qt.WindowModal)
+
         # Store the processed data
         self.rpw_data = None
         self.processed_rpw_data = None
@@ -1220,15 +1574,20 @@ class ImportRpwTnrDialog(QDialog):
         self.rpw_tnr_edit = QLineEdit()
         tnr_btn = QPushButton("Browse...")
         tnr_btn.clicked.connect(lambda: self._browse(self.rpw_tnr_edit))
-        
+
+        # Download from CDAWeb button
+        download_rpw_btn = QPushButton("Download from CDAWeb...")
+        download_rpw_btn.clicked.connect(self._open_download_dialog)
+
         # Preview button
         self.preview_btn = QPushButton("Preview Data")
         self.preview_btn.setEnabled(False)
         self.preview_btn.clicked.connect(self._preview_rpw_data)
-        
+
         h3 = QHBoxLayout()
         h3.addWidget(self.rpw_tnr_edit)
         h3.addWidget(tnr_btn)
+        h3.addWidget(download_rpw_btn)
         h3.addWidget(self.preview_btn)
         main_form.addRow("RPW-TNR file:", h3)
         
@@ -1332,12 +1691,19 @@ class ImportRpwTnrDialog(QDialog):
         if path:
             line_edit.setText(path)
 
+    def _open_download_dialog(self):
+        dlg = DownloadRpwDataDialog("tnr", self)
+        if dlg.exec_() == QDialog.Accepted and dlg.downloaded_path:
+            self.rpw_tnr_edit.setText(dlg.downloaded_path)
+
     def _on_file_changed(self):
         """Enable/disable buttons based on file path"""
         has_file = bool(self.rpw_tnr_edit.text().strip())
         self.preview_btn.setEnabled(has_file)
         self.preview_bkg_btn.setEnabled(has_file and self.bkg_time_radio.isChecked())
-        
+        self.preview_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE if has_file else "")
+        self.load_btn.setStyleSheet("")  # needs a fresh preview of the (possibly new) file first
+
         # Hide preview if file is changed/cleared
         if not has_file:
             self.preview_group.setVisible(False)
@@ -1354,6 +1720,7 @@ class ImportRpwTnrDialog(QDialog):
         try:
             self._show_rpw_preview(rpw_file)
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error previewing RPW-TNR data:\n{str(e)}")
 
     def _show_rpw_preview(self, filepath):
@@ -1370,38 +1737,11 @@ class ImportRpwTnrDialog(QDialog):
             min_time = self.rpw_data['time'][0]
             max_time = self.rpw_data['time'][-1]
             
-            # Auto-populate time range from data - convert datetime to QDateTime
-            if hasattr(min_time, 'year'):  # Check if it's already a datetime object
-                min_qdatetime = QDateTime(min_time)
-                max_qdatetime = QDateTime(max_time)
-            else:
-                # Handle case where times might be strings or other formats
-                try:
-                    from datetime import datetime
-                    if isinstance(min_time, str):
-                        # Try parsing different date formats
-                        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%d-%b-%Y %H:%M:%S"]:
-                            try:
-                                dt_min = datetime.strptime(min_time, fmt)
-                                dt_max = datetime.strptime(max_time, fmt)
-                                min_qdatetime = QDateTime(dt_min)
-                                max_qdatetime = QDateTime(dt_max)
-                                break
-                            except ValueError:
-                                continue
-                        else:
-                            # If no format worked, use current time as fallback
-                            min_qdatetime = QDateTime.currentDateTime()
-                            max_qdatetime = QDateTime.currentDateTime()
-                    else:
-                        # Try direct conversion
-                        min_qdatetime = QDateTime(min_time)
-                        max_qdatetime = QDateTime(max_time)
-                except:
-                    # Fallback to current time if all conversion attempts fail
-                    min_qdatetime = QDateTime.currentDateTime()
-                    max_qdatetime = QDateTime.currentDateTime()
-            
+            # Auto-populate time range from data - convert to QDateTime (handles
+            # python datetime, numpy.datetime64, and common date strings)
+            min_qdatetime = _time_value_to_qdatetime(min_time)
+            max_qdatetime = _time_value_to_qdatetime(max_time)
+
             # Set the datetime widgets with the data time range
             self.bkg_start_datetime.setDateTime(min_qdatetime)
             self.bkg_end_datetime.setDateTime(max_qdatetime)
@@ -1420,13 +1760,16 @@ class ImportRpwTnrDialog(QDialog):
             
             # Show the preview section
             self.preview_group.setVisible(True)
-            
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
+
             # Show success message with time range info
             time_info = f"Data time range: {min_time} to {max_time}"
-            QMessageBox.information(self, "Preview Generated", 
+            QMessageBox.information(self, "Preview Generated",
                                   f"RPW-TNR raw data preview loaded successfully.\n\nFile: {filepath.split('/')[-1]}\n{time_info}\n\nBackground time range has been set to data limits.")
             
         except Exception as e:
+            logger.exception("Unhandled error")
             self.preview_group.setVisible(False)
             raise Exception(f"Failed to generate preview: {str(e)}")
     def _preview_with_background(self):
@@ -1474,8 +1817,11 @@ class ImportRpwTnrDialog(QDialog):
             QMessageBox.information(self, "Background Preview",
                                   f"RPW-TNR data with background subtraction preview generated.\n\n{bkg_info}")
             self.plot_bkg_btn.setEnabled(True)
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
 
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Error", f"Error applying background subtraction:\n{str(e)}")
 
 
@@ -1497,9 +1843,11 @@ class ImportRpwTnrDialog(QDialog):
             fig.suptitle("RPW-TNR Background Plot", fontsize=12)
 
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)  # Non-blocking
 
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Plot Error", f"Error plotting RPW-TNR background:\n{str(e)}")
 
 
@@ -1566,6 +1914,7 @@ class ImportRpwTnrDialog(QDialog):
             self.accept()
 
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Load Error", f"Error loading RPW-TNR data:\n{str(e)}")
 
     def _toggle_bkg_controls(self):
@@ -1704,6 +2053,8 @@ class ImportEpdDialog(QDialog):
             self.energies_ept = None
             self.preview_btn.setEnabled(False)
             self.load_btn.setEnabled(False)
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet("")
             self.preview_group.setVisible(False)
 
     def _download_epd_data(self):
@@ -1735,8 +2086,10 @@ class ImportEpdDialog(QDialog):
             # Enable preview and load buttons
             self.preview_btn.setEnabled(True)
             self.load_btn.setEnabled(True)
-            
-            QMessageBox.information(self, "Download Complete", 
+            self.preview_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
+            self.load_btn.setStyleSheet("")  # needs a fresh preview of the (possibly new) download first
+
+            QMessageBox.information(self, "Download Complete",
                                   f"EPD data downloaded successfully!\n\nDate: {selected_date}\nPath: {download_path}")
             
             print(f"EPD data downloaded for {selected_date}")
@@ -1745,6 +2098,7 @@ class ImportEpdDialog(QDialog):
             print(f"Energies loaded: {self.energies_ept is not None}")
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Download Error", f"Error downloading EPD data:\n{str(e)}")
             print(f"EPD download error: {e}")
 
@@ -1807,11 +2161,14 @@ class ImportEpdDialog(QDialog):
             
             # Show the preview section
             self.preview_group.setVisible(True)
-            
-            QMessageBox.information(self, "Preview Generated", 
+            self.preview_btn.setStyleSheet("")
+            self.load_btn.setStyleSheet(_NEXT_STEP_BUTTON_STYLE)
+
+            QMessageBox.information(self, "Preview Generated",
                                 f"EPD {particle} data preview generated successfully.\n\nDate: {selected_date}\nResample: {resample}")
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error generating EPD preview:\n{str(e)}")
             print(f"EPD preview error: {e}")
 
@@ -2424,6 +2781,11 @@ class PlotPrefsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Plotting preferences")
         self.resize(520, 520)
+        # Window-modal instead of the Qt default application-modal for exec_() - the
+        # various "Preview"/"Plot Background" buttons here open unrelated top-level
+        # matplotlib windows, which application-modal would block from accepting
+        # input until this dialog itself is closed.
+        self.setWindowModality(Qt.WindowModal)
         self.parent = parent  # Store reference to main window
         
         # Store energy ranges
@@ -3024,9 +3386,11 @@ class PlotPrefsDialog(QDialog):
                 ax.set_title(title)
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error plotting STIX preview:\n{str(e)}")
     def _plot_rpw_hfr_preview(self):
         """Plot RPW-HFR preview"""
@@ -3143,9 +3507,11 @@ class PlotPrefsDialog(QDialog):
                         ax.invert_yaxis()
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error plotting RPW-HFR preview:\n{str(e)}")
 
     def _plot_rpw_tnr_preview(self):
@@ -3263,9 +3629,11 @@ class PlotPrefsDialog(QDialog):
                         ax.invert_yaxis()
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error plotting RPW-TNR preview:\n{str(e)}")
     def _plot_epd_preview(self):
         """Plot EPD preview"""
@@ -3316,9 +3684,11 @@ class PlotPrefsDialog(QDialog):
                 ax.set_yscale("log")
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Preview Error", f"Error plotting EPD preview:\n{str(e)}")
 
     def get_selected_epd_channels(self):
@@ -3366,9 +3736,11 @@ class PlotPrefsDialog(QDialog):
             fig.suptitle("STIX Background Plot", fontsize=12)
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)  # Non-blocking
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Plot Error", f"Error plotting STIX background:\n{str(e)}")
 
     def _plot_rpw_hfr_background(self):
@@ -3393,9 +3765,11 @@ class PlotPrefsDialog(QDialog):
             fig.suptitle("RPW-HFR Background Plot", fontsize=12)
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)  # Non-blocking
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Plot Error", f"Error plotting RPW-HFR background:\n{str(e)}")
 
     def _plot_rpw_tnr_background(self):
@@ -3420,9 +3794,11 @@ class PlotPrefsDialog(QDialog):
             fig.suptitle("RPW-TNR Background Plot", fontsize=12)
             
             plt.tight_layout()
+            fig.canvas.draw()
             plt.show(block=False)  # Non-blocking
             
         except Exception as e:
+            logger.exception("Unhandled error")
             QMessageBox.critical(self, "Background Plot Error", f"Error plotting RPW-TNR background:\n{str(e)}")
 
     def _do_combined_plot(self):
@@ -4061,6 +4437,7 @@ class MainWindow(QMainWindow):
                 plt.show(block=False)
                 return
             except Exception as e:
+                logger.exception("Unhandled error")
                 print(f"Error plotting STIX data: {e}")
                 QMessageBox.warning(self, "Plot Error", f"Error plotting STIX data: {str(e)}")
         

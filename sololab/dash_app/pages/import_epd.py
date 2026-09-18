@@ -9,6 +9,7 @@ a fixed, shared server-side cache directory (EPD_CACHE_DIR) - the data is
 public per-day science data, so sharing the cache across sessions/users is
 fine and avoids re-downloading the same day repeatedly.
 """
+import logging
 from datetime import date, datetime
 
 import dash
@@ -26,6 +27,8 @@ from sololab.dash_app.constants import (
     EPD_RESAMPLE_OPTIONS,
 )
 from sololab.dash_app.session_store import session_store
+
+logger = logging.getLogger(__name__)
 
 dash.register_page(__name__, path="/import/epd", name="Import EPD")
 
@@ -136,6 +139,7 @@ def epd_download(n_clicks, date_str, sid):
         session_store.set(sid, "epd_energies", energies)
         return False, False, f"EPD data downloaded for {date_str}.", "success", True
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return True, True, str(exc), "danger", True
 
 
@@ -173,6 +177,7 @@ def epd_preview(n_clicks, particle, resample, date_str, sid):
         )
         return fig, "", "success", False
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, str(exc), "danger", True
 
 

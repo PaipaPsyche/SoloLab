@@ -23,9 +23,7 @@ import cdflib
 
 ## ASTROPY
 from astropy.io import fits
-from astropy.time.core import Time, TimeDelta
 from astropy.table import Table, vstack, hstack
-import astropy.units as u
 
 
 
@@ -396,7 +394,7 @@ def rpw_plot_curves(rpw_psd,savename=None,
             ax.plot([plot_time[0],plot_time[-1]],[np.min(plot_y),np.min(plot_y)],c="gray",lw=0.5,ls=":")
 
             text_height =10*np.sqrt(np.max(plot_y)*np.min(plot_y))
-            text_x = plot_time[0]+TimeDelta(120*u.s).to_datetime()
+            text_x = plot_time[0]+np.timedelta64(120,'s')
             ax.text(text_x, text_height, "{} kHz".format(int(pg[0])), horizontalalignment='left',verticalalignment='top',color = lcolor[g],fontweight="bold")#, transform=ax.transAxes)
             #ax.plot([plot_time[0],plot_time[-1]],[int(pg[0]),int(pg[0])],c=lcolor[g],lw=0.5,ls=ls)
             if(np.max(plot_y)>lims[1] or lims[1]==0):

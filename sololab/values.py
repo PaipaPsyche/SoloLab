@@ -1,4 +1,6 @@
 import numpy as np
+from astropy import constants as _const
+from astropy import units as _u
 from scipy import stats
 
 # CONSTANTS
@@ -11,14 +13,22 @@ fits_date_fmt="%Y%m%dT%H%M%S"
 
 
 
-speed_c_kms = 299792.458 #km/s
-m_e_kg = 9.1093837015e-31 #kg (CODATA electron rest mass; was 9.31e-31, ~2.2% too high)
-Rs_per_AU = 215.032
-km_per_Rs = 695700.
-WmHz_per_sfu=1e-22
-ev_per_joule = 6.24e18 # ev perjoule
-ergs_per_kev = 1.602e-9  # ergs/kev
-kb_in_kev_per_K = 8.617333e-8 # keV/K
+# Physical constants, derived from astropy.constants/units instead of
+# hand-transcribed literals: m_e_kg used to be hardcoded as 9.31e-31 (~2.2%
+# off from CODATA), silently biasing every FDRA beam-energy result until
+# that was caught - deriving from astropy means the value always tracks
+# the current CODATA release with no manual-transcription step to get
+# wrong again. WmHz_per_sfu is a domain unit definition (radio astronomy's
+# "solar flux unit"), not a measured physical constant, so it stays a
+# literal - astropy has no built-in equivalent.
+speed_c_kms = _const.c.to(_u.km / _u.s).value  # km/s
+m_e_kg = _const.m_e.to(_u.kg).value  # kg
+Rs_per_AU = (1 * _u.AU).to(_u.R_sun).value
+km_per_Rs = _const.R_sun.to(_u.km).value
+WmHz_per_sfu = 1e-22
+ev_per_joule = (1 * _u.J).to(_u.eV).value  # eV per joule
+ergs_per_kev = (1 * _u.keV).to(_u.erg).value  # ergs per keV
+kb_in_kev_per_K = _const.k_B.to(_u.keV / _u.K).value  # keV/K
 
 
 # rpw indexes

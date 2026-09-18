@@ -1,5 +1,9 @@
 from .values import *
 import os
+import re
+import shutil
+import urllib.request
+import urllib.error
 import numpy as np
 import math
 from datetime import datetime,time,timedelta
@@ -57,6 +61,91 @@ def _coerce_time_data(time_data):
         except Exception:
             return arr.astype("datetime64[s]")
     return arr
+
+# --- RPW L3 CDAWeb download (HFR/TNR, one file per day) --------------------
+#
+# cdaweb.gsfc.nasa.gov serves daily RPW-HFR/TNR L3 CDF files under a plain
+# Apache directory listing (one folder per year, no API/auth needed), e.g.:
+#   .../l3/hfr-surv-flux/2025/solo_l3_rpw-hfr-surv-flux_20250114_v02.cdf
+#   .../l3/tnr-surv-flux/2021/solo_l3_rpw-tnr-surv-flux_20210111_v02.cdf
+# so "which dates are available" and "download this date" are both answered
+# by parsing that listing - the version suffix (v01/v02/...) varies over
+# time and can't be guessed, so it's always read off the listing rather than
+# hardcoded.
+
+RPW_CDAWEB_L3_TYPES = {"hfr": "hfr-surv-flux", "tnr": "tnr-surv-flux"}
+RPW_CDAWEB_BASE_URL = "https://cdaweb.gsfc.nasa.gov/sp_phys/data/solar-orbiter/rpw/science/l3"
+_RPW_CDAWEB_FILENAME_RE = re.compile(r'href="(solo_l3_rpw-(hfr|tnr)-surv-flux_(\d{8})_v\d+\.cdf)"')
+
+
+def _parse_calendar_date(value):
+    """Coerce value to a datetime at midnight (date-only - RPW L3 files are
+    daily). Accepts a datetime/date, or a 'YYYY-MM-DD'/'YYYYMMDD' string."""
+    if isinstance(value, datetime):
+        return datetime(value.year, value.month, value.day)
+    if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+        return datetime(value.year, value.month, value.day)
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value.replace("-", ""), "%Y%m%d")
+        except ValueError:
+            pass
+    raise ValueError(f"Cannot interpret {value!r} as a calendar date")
+
+
+def rpw_cdaweb_list_available_dates(data_type, year):
+    """List RPW-HFR/TNR L3 CDF files published on CDAWeb for a given year.
+
+    data_type: "hfr" or "tnr". Returns a dict {datetime (day, no time):
+    filename}, so a caller (e.g. a UI date picker) can restrict selection to
+    dates that actually exist instead of guessing. Empty dict if that year
+    has no data folder on the server (e.g. before the mission or too far in
+    the future) - not an error.
+    """
+    if data_type not in RPW_CDAWEB_L3_TYPES:
+        raise ValueError(f"data_type must be one of {list(RPW_CDAWEB_L3_TYPES)}, got {data_type!r}")
+
+    url = f"{RPW_CDAWEB_BASE_URL}/{RPW_CDAWEB_L3_TYPES[data_type]}/{year}/"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "sololab"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {}
+        raise
+
+    out = {}
+    for filename, ftype, yyyymmdd in _RPW_CDAWEB_FILENAME_RE.findall(html):
+        if ftype == data_type:
+            out[datetime.strptime(yyyymmdd, "%Y%m%d")] = filename
+    return out
+
+
+def rpw_download_cdaweb_file(date, data_type, download_dir):
+    """Download one RPW-HFR/TNR L3 CDF file from CDAWeb for a single day.
+
+    date: a datetime/date, or a 'YYYY-MM-DD'/'YYYYMMDD' string. data_type:
+    "hfr" or "tnr". Returns the local file path. Raises FileNotFoundError
+    (with a clear message) if no file is published for that exact date - RPW
+    files are daily, so there is no "closest available date" fallback.
+    """
+    date = _parse_calendar_date(date)
+    available = rpw_cdaweb_list_available_dates(data_type, date.year)
+    filename = available.get(date)
+    if filename is None:
+        raise FileNotFoundError(
+            f"No RPW-{data_type.upper()} L3 file available on CDAWeb for {date.strftime('%Y-%m-%d')}."
+        )
+
+    url = f"{RPW_CDAWEB_BASE_URL}/{RPW_CDAWEB_L3_TYPES[data_type]}/{date.year}/{filename}"
+    os.makedirs(download_dir, exist_ok=True)
+    dest_path = os.path.join(download_dir, filename)
+    req = urllib.request.Request(url, headers={"User-Agent": "sololab"})
+    with urllib.request.urlopen(req, timeout=120) as resp, open(dest_path, "wb") as f:
+        shutil.copyfileobj(resp, f)
+    return dest_path
+
 
 def rpw_read_tnr_cdf(filepath, sensor=4, start_index=0, end_index=-99, data_index=0):
 
@@ -302,9 +391,7 @@ def rpw_read_L3_data(filepath):
     psd_sfu_vals = cdf_file.varget('PSD_SFU')
     
     freqs = cdf_file.varget('FREQUENCY')
-    time = cdf_file.varget('TIMING')
     epoch = cdf_file.varget('EPOCH')
-    bkg = cdf_file.varget('BACKGROUND')
     time = np.array(cdflib.cdfepoch.to_datetime(epoch) )
     flux= cdf_file.varget('PSD_FLUX')
     
@@ -414,7 +501,12 @@ def tnr_del_unwanted_values(array, freq,tnr_remove_idx=tnr_remove_idx):
 # RPW get data object
 def rpw_get_data(file,sensor=None,filter = tnr_remove_idx):
     
-    datalevel =  os.path.basename(file).split('_')[1]
+    # Normalized to uppercase here (the one place datalevel is parsed from
+    # the filename) since every downstream comparison of data["level"]
+    # expects "L2"/"L3" - CDAWeb's official RPW L3 filenames use lowercase
+    # "l3" (e.g. solo_l3_rpw-hfr-surv-flux_...), unlike older local sample
+    # files using uppercase "L3".
+    datalevel = os.path.basename(file).split('_')[1].upper()
 
     data_types = ["hfr","tnr"]
     for dtp in data_types:

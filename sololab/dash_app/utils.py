@@ -3,7 +3,9 @@ status badge text, and a generic editable-list modal (reused for STIX energy
 ranges, RPW frequencies and EPD channels in pages/plot_prefs.py).
 """
 import base64
+import contextlib
 import os
+import shutil
 import tempfile
 from datetime import datetime
 
@@ -82,6 +84,20 @@ def bytes_to_tempfile(data, filename):
 
 def upload_to_tempfile(contents, filename):
     return bytes_to_tempfile(decode_upload(contents), filename)
+
+
+@contextlib.contextmanager
+def tempfile_from_bytes(data, filename):
+    """Same as bytes_to_tempfile, but as a context manager that removes the
+    temp directory on exit (success or exception). bytes_to_tempfile on its
+    own leaked one temp dir per Preview/Preview-w-Bkg/Load click with no
+    cleanup anywhere in the app - unbounded disk growth on a long-running
+    server (Backend Fixes item: Dash disk leak)."""
+    path = bytes_to_tempfile(data, filename)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
 
 
 # Status badges ---------------------------------------------------------------------

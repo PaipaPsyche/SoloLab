@@ -1,5 +1,7 @@
 """Save/load session data as a .pkl - UI for sololab/dash_app/data_pack.py
 (port of MainWindow's "Save/Load Data Pack" buttons)."""
+import logging
+
 import dash
 import dash_bootstrap_components as dbc
 from dash import Input, Output, State, callback, dcc, html
@@ -7,6 +9,8 @@ from dash.exceptions import PreventUpdate
 
 from sololab.dash_app import data_pack
 from sololab.dash_app.utils import decode_upload
+
+logger = logging.getLogger(__name__)
 
 dash.register_page(__name__, path="/data-pack", name="Data Pack")
 
@@ -98,4 +102,5 @@ def load_data_pack(contents, sid, status):
         msg = f"Loaded: {', '.join(loaded)}." if loaded else "No instrument data found in this file."
         return status, msg, "success", True
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
         return dash.no_update, str(exc), "danger", True
