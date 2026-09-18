@@ -29,6 +29,7 @@ CORE_PACKAGES = [
     ("matplotlib", "matplotlib"),
     ("astropy", "astropy"),
     ("sunpy", "sunpy"),
+    ("h5py", "h5py"),  # not used by sololab directly - avoids a SunpyUserWarning solo-epd-loader triggers on import
     ("cdflib", "cdflib"),
     ("solo_epd_loader", "solo-epd-loader"),
     ("seaborn", "seaborn"),

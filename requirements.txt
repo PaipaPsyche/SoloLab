@@ -4,6 +4,7 @@ pandas
 matplotlib
 astropy
 sunpy==4.1.7
+h5py  # not used by sololab directly - silences a SunpyUserWarning triggered when solo-epd-loader imports sunpy.io._cdf at startup
 solo-epd-loader>=0.4.4,<0.5  # EPD energy-bin label shape changed between versions before 0.4.4 (see sololab.quicklooks._epd_bin_text); test before widening this range
 cdflib
 stixdcpy  # optional: only needed for sololab.stix_read.stix_query_science_files/stix_download_file (download from the STIX Data Center)
