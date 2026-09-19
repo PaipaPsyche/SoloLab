@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
 # is highlighted once a file is selected, "LOAD" once that file has actually
 # been previewed - both were already enabled at that point, just easy to miss
 # among the other controls.
-_NEXT_STEP_BUTTON_STYLE = "background-color: #dff0d8; font-weight: bold; border: 1px solid #3c763d;"
+_NEXT_STEP_BUTTON_STYLE = "font-weight: bold;"
 
 
 def _to_py_datetime(value):
@@ -506,12 +506,12 @@ class DownloadStixDataDialog(QDialog):
         now = QDateTime.currentDateTime()
         self.start_datetime = QDateTimeEdit(now.addDays(-1))
         self.start_datetime.setCalendarPopup(True)
-        self.start_datetime.setDisplayFormat("yyyy-MM-dd hh:mm:ss")
+        self.start_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")  # no seconds - inconvenient to set, not needed
         form.addRow("From:", self.start_datetime)
 
         self.end_datetime = QDateTimeEdit(now)
         self.end_datetime.setCalendarPopup(True)
-        self.end_datetime.setDisplayFormat("yyyy-MM-dd hh:mm:ss")
+        self.end_datetime.setDisplayFormat("yyyy-MM-dd HH:mm")
         form.addRow("To:", self.end_datetime)
 
         self.product_combo = QComboBox()
@@ -551,8 +551,11 @@ class DownloadStixDataDialog(QDialog):
         layout.addWidget(buttons)
 
     def _search(self):
-        start = self.start_datetime.dateTime().toString("yyyy-MM-ddThh:mm:ss")
-        end = self.end_datetime.dateTime().toString("yyyy-MM-ddThh:mm:ss")
+        # Seconds aren't shown/settable in the picker (see setDisplayFormat
+        # above), so zero them explicitly rather than silently querying
+        # with whatever second the dialog happened to be opened on.
+        start = self.start_datetime.dateTime().toString("yyyy-MM-ddThh:mm") + ":00"
+        end = self.end_datetime.dateTime().toString("yyyy-MM-ddThh:mm") + ":00"
         product_type = self.product_combo.currentData()
 
         self.results_list.clear()
@@ -574,9 +577,11 @@ class DownloadStixDataDialog(QDialog):
             return
 
         self._results = results
+        type_label = "PIXEL" if product_type == "xray-l1" else "SPEC"
         for r in results:
-            t0, t1 = r.get("observation_time_range", ["?", "?"])
-            item = QListWidgetItem(f"[{r.get('file_id')}] {t0} to {t1}  (level {r.get('level', '?')})")
+            t0 = datetime.fromisoformat(r.get("observation_time_range", ["?", "?"])[0])
+            filename = r.get("url", "").rsplit("/", 1)[-1] or f"file_id={r.get('file_id')}"
+            item = QListWidgetItem(f"{t0:%Y-%m-%d}  {t0:%H:%M}    {type_label}   {filename}")
             item.setData(Qt.UserRole, r.get("file_id"))
             self.results_list.addItem(item)
 
@@ -1117,8 +1122,10 @@ class DownloadRpwDataDialog(QDialog):
             )
             return
 
+        type_label = self.data_type.upper()  # HFR or TNR
         for date in sorted(self._available_dates):
-            item = QListWidgetItem(date.strftime("%Y-%m-%d"))
+            filename = self._available_dates[date]
+            item = QListWidgetItem(f"{date:%Y-%m-%d}    {type_label}   {filename}")
             item.setData(Qt.UserRole, date)
             self.results_list.addItem(item)
 
@@ -1256,7 +1263,7 @@ class ImportRpwHfrDialog(QDialog):
         bkg_poll_layout.addWidget(QLabel("Background polling function:"))
         self.bkg_poll_combo = QComboBox()
         self.bkg_poll_combo.addItems(["max", "mean", "median", "min", "P_25", "P_75"])
-        self.bkg_poll_combo.setCurrentText("max")  # Default for RPW
+        self.bkg_poll_combo.setCurrentText("median")  # Default for RPW
         bkg_poll_layout.addWidget(self.bkg_poll_combo)
         bkg_layout.addLayout(bkg_poll_layout)
         
@@ -1651,7 +1658,7 @@ class ImportRpwTnrDialog(QDialog):
         bkg_poll_layout.addWidget(QLabel("Background polling function:"))
         self.bkg_poll_combo = QComboBox()
         self.bkg_poll_combo.addItems(["max", "mean", "median", "min", "P_25", "P_75"])
-        self.bkg_poll_combo.setCurrentText("max")  # Default for RPW
+        self.bkg_poll_combo.setCurrentText("median")  # Default for RPW
         bkg_poll_layout.addWidget(self.bkg_poll_combo)
         bkg_layout.addLayout(bkg_poll_layout)
         
@@ -2813,7 +2820,11 @@ class PlotPrefsDialog(QDialog):
         self.stix_logy_countrate = QCheckBox("Log Y axis (count rate)")
         self.stix_logy_energy_overlay = QCheckBox("Log Y axis (energy in spectrogram)")
         self.stix_logy_countrate_overlay = QCheckBox("Log Y axis (count rate in time profiles)")
-        
+
+        # Default: log Y on for STIX spectrograms and light curves
+        self.stix_logy_energy.setChecked(True)
+        self.stix_logy_countrate.setChecked(True)
+
         # Initially show only energy checkbox (spectrogram is default)
         self.stix_logy_countrate.setVisible(False)
         self.stix_logy_energy_overlay.setVisible(False)
@@ -2826,6 +2837,7 @@ class PlotPrefsDialog(QDialog):
         
         # Log Z axis (only for spectrogram/overlay)
         self.stix_logz = QCheckBox("Log Z axis")
+        self.stix_logz.setChecked(True)  # Default: log Z on for STIX spectrograms
         stix_form.addRow(self.stix_logz)
         
         stix_layout.addLayout(stix_form)
@@ -2916,7 +2928,10 @@ class PlotPrefsDialog(QDialog):
         self.rpw_logy_intensity = QCheckBox("Log Y axis (intensity)")
         self.rpw_logy_frequency_overlay = QCheckBox("Log Y axis (frequency in spectrogram)")
         self.rpw_logy_intensity_overlay = QCheckBox("Log Y axis (intensity in time profiles)")
-        
+
+        # Default: log Y on for RPW spectrograms
+        self.rpw_logy_frequency.setChecked(True)
+
         # Initially show only frequency checkbox (spectrogram is default)
         self.rpw_logy_intensity.setVisible(False)
         self.rpw_logy_frequency_overlay.setVisible(False)
@@ -2929,6 +2944,7 @@ class PlotPrefsDialog(QDialog):
         
         # Log Z axis (only for spectrogram/overlay)
         self.rpw_logz = QCheckBox("Log Z axis")
+        self.rpw_logz.setChecked(True)  # Default: log Z on for RPW spectrograms
         rpw_form.addRow(self.rpw_logz)
         
         # Invert Y axis (only for spectrogram/overlay)
@@ -3027,6 +3043,7 @@ class PlotPrefsDialog(QDialog):
         
         epd_form = QFormLayout()
         self.epd_logy = QCheckBox("Log Y axis")
+        self.epd_logy.setChecked(True)  # Default: log Y on for EPD
         epd_form.addRow(self.epd_logy)
         epd_layout.addLayout(epd_form)
         
@@ -3854,9 +3871,9 @@ class MainWindow(QMainWindow):
         self.energies_ept = None
         
         self.plot_prefs = {
-            "stix": {"type": "spectrogram", "logy": False, "logz": False},
-            "rpw": {"type": "spectrogram", "logy": False, "logz": False, "invert_y": True, "overlay": "Both", "selected_frequencies": []},
-            "epd": {"logy": False},
+            "stix": {"type": "spectrogram", "logy": True, "logz": True},
+            "rpw": {"type": "spectrogram", "logy": True, "logz": True, "invert_y": True, "overlay": "Both", "selected_frequencies": []},
+            "epd": {"logy": True},
         }
 
         central = QWidget()

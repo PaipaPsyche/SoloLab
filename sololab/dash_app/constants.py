@@ -16,7 +16,10 @@ STIX_POLL_OPTIONS = ["mean", "median", "min", "max", "P_25", "P_75"]
 STIX_POLL_DEFAULT = "mean"
 
 RPW_POLL_OPTIONS = ["max", "mean", "median", "min", "P_25", "P_75"]
-RPW_POLL_DEFAULT = "max"
+RPW_POLL_DEFAULT = "median"
+
+EPD_POLL_OPTIONS = ["mean", "median", "min", "max", "P_25", "P_75"]
+EPD_POLL_DEFAULT = "mean"
 
 EPD_RESAMPLE_OPTIONS = ["30sec", "1min", "2min", "5min", "10min"]
 EPD_RESAMPLE_DEFAULT = "1min"
@@ -61,8 +64,17 @@ DEFAULT_PLOT_PREFS = {
         "selected_frequencies": [],
     },
     "epd": {
+        "type": "time profiles",
         "logy": False,
         "selected_channels": [2, 6, 14, 18, 26],
+    },
+    "combined": {
+        "display_instruments": [],
+        # Top-to-bottom default: EPD top, then TNR, HFR, STIX at the bottom.
+        "panel_order": ["epd", "tnr", "hfr", "stix"],
+        "date_range_enabled": False,
+        "linewidth": 1.5,
+        "fontsize": 6,
     },
 }
 

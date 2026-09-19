@@ -26,7 +26,8 @@ GUI — see [`sololab_examples.ipynb`](sololab_examples.ipynb).
   direct download from [CDAWeb](https://cdaweb.gsfc.nasa.gov/)); EPD (L2, auto-downloaded via
   [`solo-epd-loader`](https://github.com/jgieseler/solo-epd-loader)).
 - **Processing** — STIX background subtraction (BKG file and/or quiet-time interval) with energy
-  shifts; RPW background subtraction and polluted-frequency filtering.
+  shifts; RPW background subtraction and polluted-frequency filtering; EPD background subtraction
+  over a chosen time interval, per energy channel (web app only, currently).
 - **Visualization** — spectrograms and per-channel time profiles for any instrument, combined into
   one multi-panel plot with a shared time axis.
 - **Estimations and fits** — Frequency Drift Rate Analysis (radio burst exciter velocity) and

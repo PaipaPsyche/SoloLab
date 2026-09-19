@@ -49,7 +49,7 @@ DEPLOY_PACKAGES = [
 ]
 OPTIONAL_PACKAGES = [
     # Only needed for sololab.stix_read.stix_query_science_files/stix_download_file
-    # (the desktop app's "Download from STIX Data Center..." button) - everything
+    # (both apps' "Download from STIX Data Center..." button/section) - everything
     # else works fine without it.
     ("stixdcpy", "stixdcpy"),
 ]

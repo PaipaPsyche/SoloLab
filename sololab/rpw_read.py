@@ -680,6 +680,7 @@ def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_i
     z_axis = z_axis[freq_idx,:]
 
     mn_bkg=None
+    bkg_std=None
     polling = None
 # BKG subtraction (approx) if needed
     if rpw_bkg_interval :
@@ -696,6 +697,10 @@ def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_i
 
         idx_in = [j for j in range(len(time_data)) if np.logical_and(time_data[j]>=rpw_bkg_interval[0],time_data[j]<=rpw_bkg_interval[-1])]
 
+        # std of the polled interval per frequency channel, alongside the
+        # poll result itself - lets the background plot show error bars
+        # instead of just the bare poll value.
+        bkg_std = np.std(z[np.ix_(freq_idx,idx_in)],axis=1)
         mn_bkg = func_bkg(z[np.ix_(freq_idx,idx_in)],axis=1)
         mn_bkg = np.array([mn_bkg for i in range(np.shape(z_axis)[1])]).T
         mn_bkg = mn_bkg.clip(0,np.inf)
@@ -718,6 +723,7 @@ def rpw_create_PSD_L2(data,freq_range=None,date_range=None,freq_col=0,proposed_i
         "v":z_axis,
         "df":dfreq,
         "bkg":mn_bkg,
+        "bkg_std":bkg_std,
         'polling_function':polling,
         "type":data_type,
         'level':data['level']
@@ -785,6 +791,7 @@ def rpw_create_PSD_L3(data,freq_range=None,date_range=None,freq_col=0,proposed_i
     z_axis = z_axis[freq_idx,:]
 
     mn_bkg=None
+    bkg_std=None
     polling=None
 # BKG subtraction (approx) if needed
     if rpw_bkg_interval :
@@ -801,6 +808,7 @@ def rpw_create_PSD_L3(data,freq_range=None,date_range=None,freq_col=0,proposed_i
 
         idx_in = [j for j in range(len(time_data)) if np.logical_and(time_data[j]>=rpw_bkg_interval[0],time_data[j]<=rpw_bkg_interval[-1])]
 
+        bkg_std = np.std(z[np.ix_(freq_idx,idx_in)],axis=1)
         mn_bkg = func_bkg(z[np.ix_(freq_idx,idx_in)],axis=1)
         mn_bkg = np.array([mn_bkg for i in range(np.shape(z_axis)[1])]).T
         mn_bkg = mn_bkg.clip(0,np.inf)
@@ -818,6 +826,7 @@ def rpw_create_PSD_L3(data,freq_range=None,date_range=None,freq_col=0,proposed_i
         "v":z_axis,
         "df":dfreq,
         "bkg":mn_bkg,
+        "bkg_std":bkg_std,
         'polling_function':polling,
         "type":data_type,
         'level':data["level"]

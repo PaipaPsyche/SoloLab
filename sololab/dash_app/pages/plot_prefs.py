@@ -36,18 +36,26 @@ def layout(**kwargs):
         [
             html.H3("Plot Preferences", className="mt-3"),
             dbc.Alert(id="plotprefs-alert", is_open=False, dismissable=True, className="mt-2"),
-            dbc.Tabs(
+            dbc.Row(
                 [
-                    dbc.Tab(_stix_tab(), label="STIX data", tab_id="stix"),
-                    dbc.Tab(_rpw_tab(), label="RPW data", tab_id="rpw"),
-                    dbc.Tab(_epd_tab(), label="EPD data", tab_id="epd"),
-                ],
-                id="plotprefs-tabs",
-                active_tab="stix",
-                className="mt-3",
+                    dbc.Col(
+                        [
+                            dbc.Tabs(
+                                [
+                                    dbc.Tab(_stix_tab(), label="STIX data", tab_id="stix"),
+                                    dbc.Tab(_rpw_tab(), label="RPW data", tab_id="rpw"),
+                                    dbc.Tab(_epd_tab(), label="EPD data", tab_id="epd"),
+                                ],
+                                id="plotprefs-tabs",
+                                active_tab="stix",
+                            ),
+                            html.Div(dbc.Button("Combined Plot", href="/combined-plot", color="primary"), className="mt-3"),
+                        ],
+                        md=4,
+                    ),
+                    dbc.Col(dcc.Graph(id="plotprefs-graph"), md=8),
+                ]
             ),
-            dcc.Graph(id="plotprefs-graph", className="mt-3"),
-            html.Div(dbc.Button("Combined Plot", href="/combined-plot", color="primary"), className="mt-3"),
             _stix_energy_ranges_modal(),
             _rpw_frequencies_modal(),
             _epd_channels_modal(),
@@ -160,6 +168,7 @@ def _rpw_tab():
                         dbc.Button("Plot RPW-TNR Preview", id="rpw-prefs-preview-tnr-btn", color="secondary"),
                         dbc.Button("Plot RPW-HFR Background", id="rpw-prefs-bkg-hfr-btn", color="secondary", disabled=True),
                         dbc.Button("Plot RPW-TNR Background", id="rpw-prefs-bkg-tnr-btn", color="secondary", disabled=True),
+                        dbc.Button("Plot Combined RPW Background", id="rpw-prefs-bkg-combined-btn", color="secondary", disabled=True),
                     ],
                     vertical=True,
                 ),
@@ -176,12 +185,25 @@ def _epd_tab():
     return dbc.Card(
         dbc.CardBody(
             [
+                html.Label("Plot type"),
+                dcc.Dropdown(
+                    id="epd-plot-type",
+                    options=["time profiles", "spectrogram"],
+                    value="time profiles",
+                    clearable=False,
+                    className="mb-2",
+                ),
                 dbc.Checkbox(id="epd-prefs-logy", label="Log Y", value=False, className="mb-2"),
                 dbc.Button(
                     "Select Energy Channels", id="epd-select-channels-btn", color="secondary", outline=True, disabled=True, className="mb-2"
                 ),
                 html.Hr(),
-                dbc.Button("Plot EPD Preview", id="epd-prefs-preview-btn", color="secondary"),
+                dbc.ButtonGroup(
+                    [
+                        dbc.Button("Plot EPD Preview", id="epd-prefs-preview-btn", color="secondary"),
+                        dbc.Button("Plot EPD Background", id="epd-prefs-bkg-btn", color="secondary", disabled=True),
+                    ]
+                ),
             ]
         ),
         className="mt-2",
@@ -203,12 +225,23 @@ def _rpw_frequencies_modal():
 
 
 def _epd_channels_modal():
-    return make_list_editor_modal("epd-channels", "EPD Energy Channels", [{"name": "Channel", "id": "channel", "type": "numeric"}])
+    """Unlike the STIX/RPW list-editor modals (typed-in numeric values), EPD
+    channels are a fixed, small set defined by the instrument - a multi-
+    select dropdown of every available channel, labeled by its energy range
+    (not the arbitrary channel number), is the natural fit."""
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("EPD Energy Channels")),
+            dbc.ModalBody(dcc.Dropdown(id="epd-channels-dropdown", options=[], value=[], multi=True)),
+            dbc.ModalFooter(dbc.Button("Done", id="epd-channels-done-btn", color="primary")),
+        ],
+        id="epd-channels-modal",
+        is_open=False,
+    )
 
 
 register_list_editor_add_row_callback("stix-energy-ranges", {"min": 4, "max": 12})
 register_list_editor_add_row_callback("rpw-frequencies", {"freq": 500})
-register_list_editor_add_row_callback("epd-channels", {"channel": 0})
 
 
 # --- visibility toggling ---------------------------------------------------------------
@@ -278,16 +311,25 @@ def toggle_stix_bkg_btn(status):
 
 
 @callback(
+    Output("epd-prefs-bkg-btn", "disabled"),
+    Input("instrument-status-store", "data"),
+)
+def toggle_epd_bkg_btn(status):
+    status = status or {}
+    return not status.get("epd", {}).get("bkg_enabled")
+
+
+@callback(
     Output("rpw-prefs-bkg-hfr-btn", "disabled"),
     Output("rpw-prefs-bkg-tnr-btn", "disabled"),
+    Output("rpw-prefs-bkg-combined-btn", "disabled"),
     Input("instrument-status-store", "data"),
 )
 def toggle_rpw_bkg_btns(status):
     status = status or {}
-    return (
-        not status.get("rpw_hfr", {}).get("bkg_enabled"),
-        not status.get("rpw_tnr", {}).get("bkg_enabled"),
-    )
+    hfr_bkg = status.get("rpw_hfr", {}).get("bkg_enabled")
+    tnr_bkg = status.get("rpw_tnr", {}).get("bkg_enabled")
+    return not hfr_bkg, not tnr_bkg, not (hfr_bkg and tnr_bkg)
 
 
 # --- live sync to plot-prefs-store ----------------------------------------------------
@@ -370,13 +412,14 @@ def sync_rpw_prefs(plot_type, logy_f, logy_i, logy_fo, logy_io, logz, invert_y, 
 
 @callback(
     Output("plot-prefs-store", "data", allow_duplicate=True),
+    Input("epd-plot-type", "value"),
     Input("epd-prefs-logy", "value"),
     State("plot-prefs-store", "data"),
     prevent_initial_call=True,
 )
-def sync_epd_prefs(logy, prefs):
+def sync_epd_prefs(plot_type, logy, prefs):
     prefs = dict(prefs or {})
-    prefs["epd"] = {**prefs.get("epd", {}), "logy": bool(logy)}
+    prefs["epd"] = {**prefs.get("epd", {}), "type": plot_type, "logy": bool(logy)}
     return prefs
 
 
@@ -460,37 +503,45 @@ def close_rpw_frequencies(n_clicks, rows, prefs):
 
 @callback(
     Output("epd-channels-modal", "is_open", allow_duplicate=True),
-    Output("epd-channels-table", "data", allow_duplicate=True),
+    Output("epd-channels-dropdown", "options"),
+    Output("epd-channels-dropdown", "value"),
     Input("epd-select-channels-btn", "n_clicks"),
     State("plot-prefs-store", "data"),
+    State("session-id", "data"),
     prevent_initial_call=True,
 )
-def open_epd_channels(n_clicks, prefs):
+def open_epd_channels(n_clicks, prefs, sid):
     if not n_clicks:
         raise PreventUpdate
     channels = (prefs or {}).get("epd", {}).get("selected_channels", [])
-    return True, [{"channel": c} for c in channels]
+    meta = session_store.get(sid, "epd_meta") or {}
+    particle = meta.get("particle", "Electron")
+    energies = session_store.get(sid, "epd_energies")
+
+    options = []
+    if energies is not None:
+        low = energies[f"{particle}_Bins_Low_Energy"]
+        width = energies[f"{particle}_Bins_Width"]
+        for c in range(len(low)):
+            low_kev, high_kev = low[c] * 1000, (low[c] + width[c]) * 1000
+            options.append({"label": f"{low_kev:.2f} - {high_kev:.2f} keV", "value": c})
+
+    return True, options, channels
 
 
 @callback(
     Output("epd-channels-modal", "is_open", allow_duplicate=True),
     Output("plot-prefs-store", "data", allow_duplicate=True),
     Input("epd-channels-done-btn", "n_clicks"),
-    State("epd-channels-table", "data"),
+    State("epd-channels-dropdown", "value"),
     State("plot-prefs-store", "data"),
     prevent_initial_call=True,
 )
-def close_epd_channels(n_clicks, rows, prefs):
+def close_epd_channels(n_clicks, channels, prefs):
     if not n_clicks:
         raise PreventUpdate
-    channels = []
-    for row in rows or []:
-        try:
-            channels.append(int(row["channel"]))
-        except (KeyError, TypeError, ValueError):
-            continue
     prefs = dict(prefs or {})
-    prefs["epd"] = {**prefs.get("epd", {}), "selected_channels": channels}
+    prefs["epd"] = {**prefs.get("epd", {}), "selected_channels": sorted(channels or [])}
     return False, prefs
 
 
@@ -619,15 +670,22 @@ def rpw_prefs_preview(n_hfr, n_tnr, prefs, sid):
     Output("plotprefs-alert", "is_open", allow_duplicate=True),
     Input("rpw-prefs-bkg-hfr-btn", "n_clicks"),
     Input("rpw-prefs-bkg-tnr-btn", "n_clicks"),
+    Input("rpw-prefs-bkg-combined-btn", "n_clicks"),
     State("session-id", "data"),
     prevent_initial_call=True,
 )
-def rpw_prefs_bkg_preview(n_hfr, n_tnr, sid):
+def rpw_prefs_bkg_preview(n_hfr, n_tnr, n_combined, sid):
     triggered = dash.callback_context.triggered_id
     if triggered == "rpw-prefs-bkg-hfr-btn" and not n_hfr:
         raise PreventUpdate
     if triggered == "rpw-prefs-bkg-tnr-btn" and not n_tnr:
         raise PreventUpdate
+    if triggered == "rpw-prefs-bkg-combined-btn" and not n_combined:
+        raise PreventUpdate
+    if triggered == "rpw-prefs-bkg-combined-btn":
+        hfr_psd = session_store.get(sid, rpw_key("hfr", "psd_final"))
+        tnr_psd = session_store.get(sid, rpw_key("tnr", "psd_final"))
+        return plotting.rpw_bkg_combined_figure(hfr_psd, tnr_psd), "", "success", False
     data_type = "hfr" if triggered == "rpw-prefs-bkg-hfr-btn" else "tnr"
     psd = session_store.get(sid, rpw_key(data_type, "psd_final"))
     return plotting.rpw_bkg_figure(psd), "", "success", False
@@ -651,7 +709,7 @@ def epd_prefs_preview(n_clicks, prefs, sid):
         if not meta:
             raise ValueError("No EPD data loaded. Import EPD data first.")
         particle = meta["particle"]
-        epd_data = session_store.get(sid, "epd_electrons_df" if particle == "Electron" else "epd_protons_df")
+        epd_data = session_store.get(sid, "epd_electrons_final" if particle == "Electron" else "epd_protons_final")
         energies = session_store.get(sid, "epd_energies")
         channels = (prefs or {}).get("epd", {}).get("selected_channels") or [2, 6, 14, 18, 26]
 
@@ -659,9 +717,42 @@ def epd_prefs_preview(n_clicks, prefs, sid):
 
         day = _dt.strptime(meta["date"], "%Y-%m-%d")
         date_range = (day.replace(hour=0, minute=0, second=0), day.replace(hour=23, minute=59, second=59))
-        fig = plotting.epd_flux_figure(
-            epd_data, energies, particle=particle, channels=channels, date_range=date_range, resample=meta.get("resample")
-        )
+        plot_type = (prefs or {}).get("epd", {}).get("type", "time profiles")
+        if plot_type == "spectrogram":
+            fig = plotting.epd_spectrogram_figure(
+                epd_data, energies, particle=particle, channels=channels, date_range=date_range, resample=meta.get("resample")
+            )
+        else:
+            fig = plotting.epd_flux_figure(
+                epd_data, energies, particle=particle, channels=channels, date_range=date_range, resample=meta.get("resample")
+            )
+        return fig, "", "success", False
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Unhandled error in callback")
+        return dash.no_update, str(exc), "danger", True
+
+
+@callback(
+    Output("plotprefs-graph", "figure", allow_duplicate=True),
+    Output("plotprefs-alert", "children", allow_duplicate=True),
+    Output("plotprefs-alert", "color", allow_duplicate=True),
+    Output("plotprefs-alert", "is_open", allow_duplicate=True),
+    Input("epd-prefs-bkg-btn", "n_clicks"),
+    State("session-id", "data"),
+    prevent_initial_call=True,
+)
+def epd_prefs_bkg_preview(n_clicks, sid):
+    if not n_clicks:
+        raise PreventUpdate
+    try:
+        meta = session_store.get(sid, "epd_meta")
+        if not meta or not meta.get("bkg_enabled"):
+            raise ValueError("No EPD background subtraction loaded. Enable it in Import EPD and Load first.")
+        particle = meta["particle"]
+        bkg = session_store.get(sid, "epd_background")
+        bkg_std = session_store.get(sid, "epd_background_std")
+        energies = session_store.get(sid, "epd_energies")
+        fig = plotting.epd_bkg_figure(bkg, bkg_std, energies, particle)
         return fig, "", "success", False
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled error in callback")

@@ -11,3 +11,9 @@ sololab/dash_app/.epd_cache/
 
 # Desktop app runtime log (created automatically, per-machine)
 sololab/sololab_app.log
+
+# Local downloaded science data
+data/
+
+# Local Claude Code session config (machine-specific)
+.claude/
