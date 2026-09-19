@@ -104,19 +104,18 @@ def tempfile_from_bytes(data, filename):
 
 
 def status_badge_content(key, info):
-    """(text, dbc.Badge color) for one instrument, given its
-    instrument-status-store entry."""
+    """(label, dbc.Badge color, hover-tooltip text) for one instrument, given
+    its instrument-status-store entry. The badge itself shows only the
+    instrument name + red/green; load details (time range, EPD params) are
+    surfaced as a hover tooltip instead of inline text."""
     label = INSTRUMENT_LABELS[key]
     if not info or not info.get("loaded"):
-        return f"{label}: No data loaded", "danger"
+        return label, "danger", "No data loaded"
     if key == "epd":
-        text = (
-            f"{label}: Loaded | {info.get('date')} | "
-            f"{info.get('particle')} | {info.get('resample')}"
-        )
+        tooltip = f"Loaded | {info.get('date')} | {info.get('particle')} | {info.get('resample')}"
     else:
-        text = f"{label}: Loaded | {info.get('min_time')} to {info.get('max_time')}"
-    return text, "success"
+        tooltip = f"Loaded | {info.get('min_time')} to {info.get('max_time')}"
+    return label, "success", tooltip
 
 
 # Generic editable-list modal -------------------------------------------------------

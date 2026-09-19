@@ -11,6 +11,10 @@ lines per instrument. Unlike the original PyQt5 app (where only HFR has a
 an intentional deviation confirmed with the user.
 """
 import logging
+import os
+import shutil
+import tempfile
+from datetime import datetime
 
 import dash
 import dash_bootstrap_components as dbc
@@ -26,6 +30,22 @@ from sololab.dash_app.utils import decode_upload, format_dt_input, parse_dt_inpu
 logger = logging.getLogger(__name__)
 
 PREVIEW_FREQUENCY_RANGE = [0, 17000]
+
+
+def _download_rpw_bytes(date, data_type):
+    """Download one day's RPW-HFR/TNR L3 file from CDAWeb into a throwaway
+    server-side temp dir, read it back as bytes, then clean up - same
+    reasoning as import_stix.py's _download_stix_bytes: the file only needs
+    to reach session_store, not persist on disk."""
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        path = rpw_read.rpw_download_cdaweb_file(date, data_type, tmp_dir)
+        filename = os.path.basename(path)
+        with open(path, "rb") as f:
+            data = f.read()
+        return filename, data
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def make_rpw_import_layout(data_type):
@@ -52,46 +72,85 @@ def make_rpw_import_layout(data_type):
                                     ),
                                     html.Div(id=f"{p}-filename", className="text-muted small mt-1"),
                                     html.Hr(),
-                                    html.H5("Background"),
-                                    dbc.RadioItems(
-                                        id=f"{p}-bkg-option",
-                                        options=[
-                                            {"label": "No background subtraction", "value": 0},
-                                            {"label": "Subtract background from a time range", "value": 1},
+                                    html.H5("Or download from CDAWeb"),
+                                    dbc.Row(
+                                        [
+                                            dbc.Col(
+                                                dbc.Input(
+                                                    id=f"{p}-search-year",
+                                                    type="number",
+                                                    min=2020,
+                                                    max=datetime.now().year + 1,
+                                                    value=datetime.now().year,
+                                                ),
+                                                width=4,
+                                            ),
+                                            dbc.Col(
+                                                dbc.Button(
+                                                    "Query available dates", id=f"{p}-search-btn",
+                                                    color="secondary", outline=True, className="w-100",
+                                                ),
+                                                width=8,
+                                            ),
                                         ],
-                                        value=0,
+                                        className="mb-2",
                                     ),
+                                    dcc.Dropdown(
+                                        id=f"{p}-search-results",
+                                        placeholder="Available dates will appear here",
+                                        className="mb-2",
+                                    ),
+                                    dbc.Button(
+                                        "Download Selected", id=f"{p}-download-btn", disabled=True,
+                                        color="secondary", outline=True, className="w-100",
+                                    ),
+                                    html.Hr(),
                                     html.Div(
                                         [
-                                            dbc.Row(
+                                            html.H5("Background"),
+                                            dbc.RadioItems(
+                                                id=f"{p}-bkg-option",
+                                                options=[
+                                                    {"label": "No background subtraction", "value": 0},
+                                                    {"label": "Subtract background from a time range", "value": 1},
+                                                ],
+                                                value=0,
+                                            ),
+                                            html.Div(
                                                 [
-                                                    dbc.Col(
-                                                        dbc.Input(
-                                                            id=f"{p}-bkg-start",
-                                                            type="text",
-                                                            placeholder="YYYY-MM-DD HH:MM:SS",
-                                                        )
-                                                    ),
-                                                    dbc.Col(
-                                                        dbc.Input(
-                                                            id=f"{p}-bkg-end",
-                                                            type="text",
-                                                            placeholder="YYYY-MM-DD HH:MM:SS",
-                                                        )
-                                                    ),
-                                                ]
-                                            )
+                                                    dbc.Row(
+                                                        [
+                                                            dbc.Col(
+                                                                dbc.Input(
+                                                                    id=f"{p}-bkg-start",
+                                                                    type="text",
+                                                                    placeholder="YYYY-MM-DD HH:MM:SS",
+                                                                )
+                                                            ),
+                                                            dbc.Col(
+                                                                dbc.Input(
+                                                                    id=f"{p}-bkg-end",
+                                                                    type="text",
+                                                                    placeholder="YYYY-MM-DD HH:MM:SS",
+                                                                )
+                                                            ),
+                                                        ]
+                                                    )
+                                                ],
+                                                id=f"{p}-bkg-time-row",
+                                                style={"display": "none"},
+                                                className="mb-2 mt-1",
+                                            ),
+                                            html.Label("Background polling function"),
+                                            dcc.Dropdown(
+                                                id=f"{p}-bkg-poll",
+                                                options=RPW_POLL_OPTIONS,
+                                                value=RPW_POLL_DEFAULT,
+                                                clearable=False,
+                                            ),
                                         ],
-                                        id=f"{p}-bkg-time-row",
+                                        id=f"{p}-bkg-section",
                                         style={"display": "none"},
-                                        className="mb-2 mt-1",
-                                    ),
-                                    html.Label("Background polling function"),
-                                    dcc.Dropdown(
-                                        id=f"{p}-bkg-poll",
-                                        options=RPW_POLL_OPTIONS,
-                                        value=RPW_POLL_DEFAULT,
-                                        clearable=False,
                                     ),
                                     html.Hr(),
                                     dbc.ButtonGroup(
@@ -181,9 +240,71 @@ def register_rpw_import_callbacks(data_type):
         return {"display": "block"} if bkg_option == 1 else {"display": "none"}
 
     @callback(
+        Output(f"{p}-search-results", "options"),
+        Output(f"{p}-search-results", "value"),
+        Output(f"{p}-alert", "children", allow_duplicate=True),
+        Output(f"{p}-alert", "color", allow_duplicate=True),
+        Output(f"{p}-alert", "is_open", allow_duplicate=True),
+        Input(f"{p}-search-btn", "n_clicks"),
+        State(f"{p}-search-year", "value"),
+        prevent_initial_call=True,
+    )
+    def search(n_clicks, year):
+        if not n_clicks:
+            raise PreventUpdate
+        if year is None:
+            return [], None, "Enter a valid year.", "warning", True
+        try:
+            available = rpw_read.rpw_cdaweb_list_available_dates(data_type, int(year))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unhandled error in callback")
+            return [], None, str(exc), "danger", True
+        if not available:
+            return [], None, f"No RPW-{data_type.upper()} L3 files found for {year} on CDAWeb.", "warning", True
+
+        type_label = data_type.upper()
+        options = [
+            {"label": f"{date:%Y-%m-%d}    {type_label}   {filename}", "value": date.strftime("%Y-%m-%d")}
+            for date, filename in sorted(available.items())
+        ]
+        return options, None, "", "success", False
+
+    @callback(
+        Output(f"{p}-download-btn", "disabled"),
+        Input(f"{p}-search-results", "value"),
+    )
+    def toggle_download_btn(value):
+        return value is None
+
+    @callback(
+        Output(f"{p}-filename", "children", allow_duplicate=True),
+        Output(f"{p}-preview-btn", "disabled", allow_duplicate=True),
+        Output(f"{p}-preview-bkg-btn", "disabled", allow_duplicate=True),
+        Output(f"{p}-load-btn", "disabled", allow_duplicate=True),
+        Output(f"{p}-alert", "children", allow_duplicate=True),
+        Output(f"{p}-alert", "color", allow_duplicate=True),
+        Output(f"{p}-alert", "is_open", allow_duplicate=True),
+        Input(f"{p}-download-btn", "n_clicks"),
+        State(f"{p}-search-results", "value"),
+        State("session-id", "data"),
+        prevent_initial_call=True,
+    )
+    def download(n_clicks, date_str, sid):
+        if not n_clicks or date_str is None:
+            raise PreventUpdate
+        try:
+            filename, data = _download_rpw_bytes(date_str, data_type)
+            session_store.set(sid, rpw_key(data_type, "file_bytes"), (filename, data))
+            return f"Selected: {filename}", False, False, False, "", "success", False
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unhandled error in callback")
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, str(exc), "danger", True
+
+    @callback(
         Output(f"{p}-preview-graph", "figure"),
         Output(f"{p}-bkg-start", "value"),
         Output(f"{p}-bkg-end", "value"),
+        Output(f"{p}-bkg-section", "style"),
         Output(f"{p}-alert", "children"),
         Output(f"{p}-alert", "color"),
         Output(f"{p}-alert", "is_open"),
@@ -200,10 +321,10 @@ def register_rpw_import_callbacks(data_type):
             fig = plotting.rpw_psd_figure(psd, frequency_range=PREVIEW_FREQUENCY_RANGE)
             start_str = format_dt_input(min(psd["time"]))
             end_str = format_dt_input(max(psd["time"]))
-            return fig, start_str, end_str, "", "success", False
+            return fig, start_str, end_str, {"display": "block"}, "", "success", False
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unhandled error in callback")
-            return dash.no_update, dash.no_update, dash.no_update, str(exc), "danger", True
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, str(exc), "danger", True
 
     @callback(
         Output(f"{p}-preview-graph", "figure", allow_duplicate=True),

@@ -30,13 +30,20 @@ STIX_DOWNLOADABLE_PRODUCT_TYPES = {
 }
 
 
-def stix_query_science_files(start, end, product_type="xray-spec", level="L1A"):
+def stix_query_science_files(start, end, product_type="xray-spec", level="L1"):
     """Query the STIX Data Center (datacenter.stix.i4ds.net) for science FITS
     files covering [start, end], without downloading anything.
 
     start, end: anything stixdcpy accepts (e.g. "2022-12-25T00:00:00" or a
     datetime). product_type: one of STIX_DOWNLOADABLE_PRODUCT_TYPES' keys.
-    level: processing level, e.g. "L1A" (near-real-time) or "L1" (final).
+    level: processing level, e.g. "L1A" (near-real-time) or "L1" (final,
+    the default - matches what stix_create_counts is meant to be fed).
+
+    The Data Center's own `level` query parameter is a no-op server-side
+    (confirmed: requesting "L1A" and "L1" both return the exact same mixed
+    list of every level), so this filters the response client-side to
+    actually honor it - otherwise near-real-time L1A files show up
+    alongside the final L1 ones with no way to tell them apart in the UI.
 
     Returns a list of dicts (one per matching file - a single day commonly
     has several, each covering a different sub-window): file_id, url,
@@ -50,7 +57,7 @@ def stix_query_science_files(start, end, product_type="xray-spec", level="L1A"):
             "Downloading STIX data requires the optional 'stixdcpy' package: pip install stixdcpy"
         ) from exc
     result = stixdcpy_net.FitsQuery.query(start, end, product_type=product_type, level=level)
-    return list(result.result)
+    return [r for r in result.result if r.get("level") == level]
 
 
 def stix_download_file(file_id, download_dir):
@@ -238,6 +245,7 @@ def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,date_range=
         #create bkg spectrum
         bkg_count_spec=data_BKG["counts_per_sec"][0]
 
+    bkg_count_std = None
     if(stix_bkg_range is not None):
         date_range=[datetime.strptime(x,std_date_fmt) for x in stix_bkg_range]
         d_idx = np.array([True if np.logical_and(x>=date_range[0],x<=date_range[1]) else False for x in data_L1["time"]])
@@ -248,7 +256,10 @@ def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,date_range=
 
 
 
-
+        # std of the polled interval per energy channel, alongside the poll
+        # result itself - lets the background plot show error bars instead
+        # of just the bare poll value.
+        bkg_count_std = np.std(data_counts_per_sec_nobkg[d_idx,:],axis=0)[:min_channels]
         bkg_interv_spec = func_bkg(data_counts_per_sec_nobkg[d_idx,:],axis=0)[:min_channels]
         bkg_array =  np.array([bkg_interv_spec for i in range(np.shape(data_counts_per_sec_nobkg)[0])])
         data_counts_per_sec_nobkg = data_counts_per_sec_nobkg - bkg_array
@@ -265,6 +276,7 @@ def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,date_range=
     return_dict = data_L1.copy()
     return_dict["counts_per_sec"] = data_counts_per_sec_nobkg
     return_dict["background"]=bkg_count_spec
+    return_dict["background_std"]=bkg_count_std
 
     return return_dict
 

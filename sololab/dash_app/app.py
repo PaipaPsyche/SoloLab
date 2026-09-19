@@ -66,37 +66,89 @@ def _start_session_cache_sweeper(interval_seconds=3600):
 _start_session_cache_sweeper()
 
 STATUS_KEYS = ["stix", "rpw_hfr", "rpw_tnr", "epd"]
+# Sidebar's 2x2 status grid order, per the design brief: RPW-HFR, RPW-TNR / STIX, EPD.
+# (Independent of STATUS_KEYS, which only orders the callback's Output list below.)
+STATUS_GRID_ORDER = ["rpw_hfr", "rpw_tnr", "stix", "epd"]
+
+FOOTER_LINKS = [
+    ("STIX Data Center", "https://datacenter.stix.i4ds.net/"),
+    ("RPW Data Center", "https://rpw-datacenter.obspm.fr"),
+    ("GitHub", "https://github.com/PaipaPsyche/SoloLab"),
+    ("Contact", "mailto:david.paipa@obspm.fr"),
+]
 
 
-def _nav_links():
-    return [
-        dbc.NavLink(page["name"], href=page["path"], active="exact")
-        for page in dash.page_registry.values()
-    ]
-
-
-def _status_badges():
+def _status_grid():
     return html.Div(
         [
-            dbc.Badge(id=f"status-badge-{key.replace('_', '-')}", color="danger", className="me-2")
-            for key in STATUS_KEYS
+            html.Div(
+                dbc.Badge(id=f"status-badge-{key.replace('_', '-')}", color="danger", className="status-badge"),
+                id=f"status-cell-{key.replace('_', '-')}",
+                className="status-cell",
+            )
+            for key in STATUS_GRID_ORDER
         ],
-        className="d-flex flex-wrap gap-1",
+        className="status-grid",
     )
 
 
-navbar = dbc.Navbar(
+topbar = dbc.Navbar(
     dbc.Container(
         [
-            dbc.NavbarBrand("SoloLab", href="/"),
-            dbc.Nav(_nav_links(), navbar=True, className="me-auto"),
-            _status_badges(),
+            dbc.NavbarBrand(
+                [
+                    html.Img(src="/assets/sololab_icon.png", height="36px", className="me-2"),
+                    "SoloLab",
+                ],
+                href="/",
+                className="d-flex align-items-center",
+            )
         ],
         fluid=True,
     ),
-    color="dark",
     dark=True,
-    className="mb-3",
+    className="topbar",
+)
+
+sidebar = html.Div(
+    [
+        html.Div(
+            [
+                dbc.Button("Import Data", href="/import", color="primary", className="w-100 mb-2"),
+                _status_grid(),
+            ],
+            className="sidebar-section",
+        ),
+        html.Hr(),
+        html.Div(
+            [
+                html.Div("Data Pack", className="sidebar-section-title"),
+                dbc.Button("Save / Load", href="/data-pack", color="secondary", outline=True, className="w-100"),
+            ],
+            className="sidebar-section",
+        ),
+        html.Hr(),
+        html.Div(
+            [
+                html.Div("Plot", className="sidebar-section-title"),
+                dbc.Nav(
+                    [
+                        dbc.NavLink("Plot Data", href="/plot-prefs", active="exact"),
+                        dbc.NavLink("Combined Plot", href="/combined-plot", active="exact"),
+                    ],
+                    vertical=True,
+                    pills=True,
+                ),
+            ],
+            className="sidebar-section",
+        ),
+    ],
+    className="sidebar",
+)
+
+bottombar = html.Div(
+    [dbc.NavLink(label, href=href, target="_blank", className="d-inline-block me-3") for label, href in FOOTER_LINKS],
+    className="bottom-bar",
 )
 
 app.layout = html.Div(
@@ -105,9 +157,14 @@ app.layout = html.Div(
         dcc.Store(id="session-id", storage_type="session"),
         dcc.Store(id="plot-prefs-store", storage_type="session", data=DEFAULT_PLOT_PREFS),
         dcc.Store(id="instrument-status-store", storage_type="session", data=DEFAULT_INSTRUMENT_STATUS),
-        navbar,
-        dbc.Container(dash.page_container, fluid=True),
-    ]
+        topbar,
+        html.Div(
+            [sidebar, html.Div(dbc.Container(dash.page_container, fluid=True), className="main-content")],
+            className="app-body",
+        ),
+        bottombar,
+    ],
+    className="app-shell",
 )
 
 
@@ -122,18 +179,19 @@ def ensure_session_id(_pathname, current):
 
 @callback(
     [Output(f"status-badge-{key.replace('_', '-')}", "children") for key in STATUS_KEYS]
-    + [Output(f"status-badge-{key.replace('_', '-')}", "color") for key in STATUS_KEYS],
+    + [Output(f"status-badge-{key.replace('_', '-')}", "color") for key in STATUS_KEYS]
+    + [Output(f"status-cell-{key.replace('_', '-')}", "title") for key in STATUS_KEYS],
     Input("instrument-status-store", "data"),
 )
 def render_status_badges(status):
     status = status or {}
-    texts = []
-    colors = []
+    labels, colors, tooltips = [], [], []
     for key in STATUS_KEYS:
-        text, color = status_badge_content(key, status.get(key))
-        texts.append(text)
+        label, color, tooltip = status_badge_content(key, status.get(key))
+        labels.append(label)
         colors.append(color)
-    return texts + colors
+        tooltips.append(tooltip)
+    return labels + colors + tooltips
 
 
 if __name__ == "__main__":

@@ -106,7 +106,7 @@ def stix_spectrogram_figure(
             ),
         )
     )
-    fig.update_yaxes(title="STIX Energy bins [keV]", type="log" if ylogscale else "linear")
+    fig.update_yaxes(title="STIX Energy bins<br>[keV]", type="log" if ylogscale else "linear")
     if energy_range:
         fig.update_yaxes(range=energy_range if not ylogscale else np.log10(energy_range))
     if date_range:
@@ -122,10 +122,17 @@ def stix_counts_traces(
     date_range=None,
     smoothing_pts=1,
     lw=1.5,
+    floor_at_one=False,
 ):
     """Port of stix_plot_counts (trace-building part only). Returns a list
     of go.Scatter, one per integration bin (or one per energy channel if
-    integrate_bins is None)."""
+    integrate_bins is None).
+
+    floor_at_one: clip each trace's count rate to a minimum of 1 before
+    plotting. True zero-count bins otherwise get silently dropped by Plotly
+    on a log Y-axis (log(0) is undefined), leaving gaps in the curve. Pass
+    this only when the caller's Y-axis is actually log-scaled - on a linear
+    axis, zero is a meaningful, correctly-rendered value."""
     color_list = ["red", "dodgerblue", "limegreen", "cyan", "magenta"]
 
     time = np.asarray(counts["time"])
@@ -166,10 +173,11 @@ def stix_counts_traces(
     traces = []
     for g, (counts_plot, e_bounds) in enumerate(plot_groups):
         label = f"{int(e_bounds[0])}-{int(e_bounds[1])} keV"
+        y_values = np.clip(counts_plot, 1.0, None) if floor_at_one else counts_plot
         traces.append(
             go.Scatter(
                 x=time,
-                y=smooth(counts_plot, smoothing_pts),
+                y=smooth(y_values, smoothing_pts),
                 mode="lines",
                 name=label,
                 line=dict(width=lw, color=color_list[g % len(color_list)]),
@@ -197,10 +205,11 @@ def stix_counts_figure(
         date_range=date_range,
         smoothing_pts=smoothing_pts,
         lw=lw,
+        floor_at_one=ylogscale,
     )
     fig = go.Figure(traces)
     fig.update_yaxes(
-        title="STIX Count Rate [cts/sec]",
+        title="STIX Count Rate<br>[cts/sec]",
         type="log" if ylogscale else "linear",
         rangemode="tozero" if not ylogscale else None,
     )
@@ -237,6 +246,7 @@ def stix_overlay_figure(
         date_range=date_range,
         smoothing_pts=stix_smoothing_points,
         lw=linewidth,
+        floor_at_one=stix_curves_ylogscale,
     )
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -244,12 +254,12 @@ def stix_overlay_figure(
     for tr in traces:
         fig.add_trace(tr, secondary_y=True)
     fig.update_yaxes(
-        title="STIX Energy bins [keV]",
+        title="STIX Energy bins<br>[keV]",
         type="log" if stix_spec_ylogscale else "linear",
         secondary_y=False,
     )
     fig.update_yaxes(
-        title="STIX Count Rate [cts/sec]",
+        title="STIX Count Rate<br>[cts/sec]",
         type="log" if stix_curves_ylogscale else "linear",
         secondary_y=True,
     )
@@ -261,7 +271,10 @@ def stix_overlay_figure(
 
 def stix_bkg_figure(counts, height=380):
     """Port of stix_plot_bkg: bkg counts/energy vs mean energy, log-log,
-    with calibration lines at 31/81 keV."""
+    with calibration lines at 31/81 keV. Error bars show the std of the
+    polled background interval per energy channel, when available (only
+    set for a time-range background, not a background-file subtraction -
+    see stix_read.stix_remove_bkg_counts)."""
     if "background" not in counts:
         fig = go.Figure()
         fig.add_annotation(text="This dataset has no subtracted background.", showarrow=False)
@@ -272,6 +285,11 @@ def stix_bkg_figure(counts, height=380):
     min_channels = min(len(energies), len(bkg_counts))
     energies = energies[:min_channels]
     bkg_counts = bkg_counts[:min_channels]
+    bkg_std = counts.get("background_std")
+    error_y = None
+    if bkg_std is not None:
+        bkg_std = np.asarray(bkg_std)[:min_channels]
+        error_y = dict(type="data", array=bkg_std / energies, visible=True)
 
     fig = go.Figure(
         go.Scatter(
@@ -279,10 +297,11 @@ def stix_bkg_figure(counts, height=380):
             y=bkg_counts / energies,
             mode="lines+markers",
             name="Background",
+            error_y=error_y,
         )
     )
     fig.update_xaxes(title="Energy [keV]", type="log")
-    fig.update_yaxes(title="Counts / sec / keV", type="log")
+    fig.update_yaxes(title="Background Count Rate<br>[cts/sec/keV]", type="log")
     if energies[-1] >= 31:
         fig.add_vline(x=31, line_dash="dash", line_color="red")
     if energies[-1] >= 81:
@@ -351,7 +370,7 @@ def rpw_psd_figure(
         )
     )
     ticks, ticktext = _rpw_y_ticks(psd["type"], f)
-    label = "RPW - TNR Frequency [MHz]" if psd["type"] == "tnr" else "RPW - HFR Frequency [MHz]"
+    label = "RPW - TNR Frequency<br>[MHz]" if psd["type"] == "tnr" else "RPW - HFR Frequency<br>[MHz]"
     fig.update_yaxes(type="log", title=label, tickvals=ticks, ticktext=ticktext)
     if frequency_range:
         fig.update_yaxes(range=[np.log10(max(frequency_range[0], f.min())), np.log10(min(frequency_range[1], f.max()))])
@@ -464,9 +483,12 @@ def rpw_overlay_figure(
 
 def rpw_bkg_figure(psd, height=380):
     """Port of rpw_plot_bkg: used-background profile + per-frequency maxima
-    of the data, log-log."""
+    of the data, log-log. Error bars on the background trace show the std
+    of the raw values polled in the background interval, when available
+    (absent on PSDs created before "bkg_std" was tracked)."""
     frequency = np.asarray(psd["frequency"])
     bkg = np.asarray(psd["bkg"])[:, 0]
+    bkg_std = psd.get("bkg_std")
     v = np.asarray(psd["v"])
     maxs = np.array([np.max(v[i, :]) for i in range(len(frequency))])
 
@@ -475,21 +497,52 @@ def rpw_bkg_figure(psd, height=380):
         go.Scatter(
             x=frequency,
             y=bkg,
-            mode="lines",
+            mode="markers+lines",
             name=f"Used Background ({psd.get('polling_function')})",
             line=dict(color="red"),
+            error_y=dict(type="data", array=bkg_std, visible=True) if bkg_std is not None else None,
         )
     )
     fig.add_trace(
         go.Scatter(x=frequency, y=maxs, mode="lines", name="Max. values in data", line=dict(color="black", dash="dot"))
     )
     fig.update_xaxes(title="Frequency [kHz]", type="log")
-    fig.update_yaxes(title="SFU" if psd["level"] == "L3" else "PSD(V)", type="log")
+    fig.update_yaxes(title="Background Flux<br>[SFU]" if psd["level"] == "L3" else "Background PSD<br>[V^2/Hz]", type="log")
     fig.update_layout(
         title=f"Background {psd['type'].upper()} {psd['level'].upper()} (used {psd.get('polling_function')})",
         height=height,
         margin=dict(l=60, r=20, t=40, b=40),
     )
+    return fig
+
+
+def rpw_bkg_combined_figure(hfr_psd, tnr_psd, height=380):
+    """Overlay HFR and TNR's used-background profiles on one log-log
+    figure. Unlike rpw_join_psds (which stitches multiple same-type PSD
+    time segments together into one continuous spectrogram), this doesn't
+    need the two to share a frequency axis - it's simply both instruments'
+    bkg-vs-frequency traces on shared axes, since HFR and TNR cover
+    different (slightly overlapping) frequency bands and are never meant to
+    be merged into one array."""
+    fig = go.Figure()
+    for psd, color in ((hfr_psd, "red"), (tnr_psd, "blue")):
+        frequency = np.asarray(psd["frequency"])
+        bkg = np.asarray(psd["bkg"])[:, 0]
+        bkg_std = psd.get("bkg_std")
+        error_y = dict(type="data", array=bkg_std, visible=True) if bkg_std is not None else None
+        fig.add_trace(
+            go.Scatter(
+                x=frequency,
+                y=bkg,
+                mode="markers+lines",
+                name=f"{psd['type'].upper()} Background ({psd.get('polling_function')})",
+                line=dict(color=color),
+                error_y=error_y,
+            )
+        )
+    fig.update_xaxes(title="Frequency [kHz]", type="log")
+    fig.update_yaxes(title="Background Flux<br>[SFU]" if hfr_psd["level"] == "L3" else "Background PSD<br>[V^2/Hz]", type="log")
+    fig.update_layout(title="Combined RPW-HFR + RPW-TNR Background", height=height, margin=dict(l=60, r=20, t=40, b=40))
     return fig
 
 
@@ -559,11 +612,15 @@ def epd_flux_figure(
         y = df[f"{particle}_Flux"][f"{particle}_Flux_{channel}"]
         if freq:
             y = y.resample(freq).mean()
+        # EPD's Y-axis is always log (see update_yaxes below) - floor at 0.1
+        # so a true zero/negative value (routine after background
+        # subtraction) doesn't silently drop the point instead of plotting it.
+        y = y.clip(lower=0.1)
         traces.append(go.Scatter(x=y.index, y=y, mode="lines", name=label))
 
     fig = go.Figure(traces)
     fig.update_yaxes(
-        title=f"EPD - EPT {particle} flux [(cm^2 sr s MeV)^-1]",
+        title=f"EPD - EPT {particle} flux<br>[(cm^2 sr s MeV)^-1]",
         type="log",
     )
     fig.update_layout(
@@ -571,6 +628,82 @@ def epd_flux_figure(
         margin=dict(l=70, r=20, t=30, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
     )
+    return fig
+
+
+def epd_spectrogram_figure(epd_df, energies_ept, particle="Electron", channels=None, date_range=None, resample=None, logscale=True, height=420):
+    """EPD flux spectrogram - same idea as rpw_psd_figure/stix_spectrogram_figure:
+    a time x energy-channel heatmap colored by flux, instead of one line per
+    channel. Y-axis uses each channel's bin-center energy (low + width/2)."""
+    df = epd_df
+    if date_range is not None:
+        start, end = date_range
+        df = df.loc[(df.index > start) & (df.index <= end)]
+
+    if channels is None:
+        channels = list(range(len(energies_ept[f"{particle}_Bins_Low_Energy"])))
+    flux = df[f"{particle}_Flux"][[f"{particle}_Flux_{c}" for c in channels]]
+
+    freq = _epd_resample_freq(resample)
+    if freq:
+        flux = flux.resample(freq).mean()
+
+    low = np.asarray(energies_ept[f"{particle}_Bins_Low_Energy"])[channels]
+    width = np.asarray(energies_ept[f"{particle}_Bins_Width"])[channels]
+    energy = low + width / 2
+
+    z = flux.values.T  # (n_channels, n_time)
+    if logscale:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z = np.where(z > 0, np.log10(z), np.nan)
+
+    fig = go.Figure(
+        go.Heatmap(
+            x=flux.index,
+            y=energy,
+            z=z,
+            colorscale="Jet",
+            colorbar=dict(title="Log10 Flux" if logscale else "Flux [(cm^2 sr s MeV)^-1]"),
+        )
+    )
+    fig.update_yaxes(title=f"{particle} Energy<br>[MeV]", type="log")
+    fig.update_layout(height=height, margin=dict(l=70, r=20, t=30, b=40))
+    return fig
+
+
+def epd_bkg_figure(bkg, bkg_std, energies_ept, particle, height=380):
+    """Background flux vs energy, with error bars from the std of the
+    polled bkg interval - EPD counterpart to
+    stix_bkg_figure/rpw_bkg_figure. Always plots every available energy
+    bin (bkg/bkg_std already cover all of them, same order as the
+    *_Flux_<n> columns) rather than only the ones chosen for the light-
+    curve plot - the background estimate itself is computed over all
+    channels (see import_epd.py's _epd_bkg_subtract), so the plot should
+    show all of it too.
+
+    Y-axis is log, matching stix_bkg_figure/rpw_bkg_figure. With `median`
+    as the poll function (the app-wide default) EPD background is
+    frequently exactly 0 for a channel - real per-channel structure often
+    still shows up in the std even when the median itself is degenerate -
+    which a log axis can't place at all, so the *displayed* value only is
+    floored at 0.1 (same floor as epd_flux_figure's light curve) purely so
+    the point still renders; the underlying bkg/bkg_std data isn't
+    modified, and error bars use the true (unfloored) std."""
+    bkg = np.asarray(bkg)
+    n = len(bkg)
+    low = np.asarray(energies_ept[f"{particle}_Bins_Low_Energy"])[:n]
+    width = np.asarray(energies_ept[f"{particle}_Bins_Width"])[:n]
+    mid_energy = low + width / 2
+    error_y = None
+    if bkg_std is not None:
+        error_y = dict(type="data", array=np.asarray(bkg_std)[:n], visible=True)
+
+    fig = go.Figure(
+        go.Scatter(x=mid_energy, y=np.clip(bkg, 0.1, None), mode="markers+lines", name="Background", error_y=error_y)
+    )
+    fig.update_xaxes(title=f"{particle} Energy [MeV]", type="log")
+    fig.update_yaxes(title=f"{particle} Background Flux<br>[(cm^2 sr s MeV)^-1]", type="log")
+    fig.update_layout(height=height, margin=dict(l=70, r=20, t=30, b=40))
     return fig
 
 
@@ -660,6 +793,42 @@ def resolve_combined_panels(display, rpw_mode, stix_mode, hfr_frequencies, tnr_f
         if disp == "epd":
             plots_todo.append("epd_curve_0")
     return plots_todo
+
+
+def _row_y_domain(fig, trace):
+    """A subplot row's y-domain, read back from the axis Plotly itself
+    assigned when the trace was added via add_trace(row=..., col=...) -
+    rather than re-deriving Plotly's row/secondary_y axis-numbering scheme."""
+    axis_id = trace.yaxis or "y"
+    axis_name = "yaxis" + axis_id[1:]
+    return fig.layout[axis_name].domain
+
+
+def _colorbar_domain(fig, trace):
+    """(y, len, yanchor) so a heatmap's colorbar lines up with its own
+    subplot row's y-domain, instead of Plotly's default (which positions
+    every colorbar the same way regardless of row - in a combined figure
+    with multiple spectrogram panels, that clusters all their titles at the
+    same spot near the top)."""
+    lo, hi = _row_y_domain(fig, trace)
+    return dict(y=(lo + hi) / 2, len=hi - lo, yanchor="middle")
+
+
+def _assign_row_legend(fig, traces, legend_index):
+    """Give one panel's curve traces their own legend box, positioned
+    beside that panel's own row - Plotly's default puts every trace's
+    legend entry into one shared box regardless of row, which clusters
+    unreadably when more than one panel has its own multi-trace legend
+    (e.g. STIX and EPD light curves in the same combined figure).
+    legend_index: 1-based, bumped by the caller once per panel that adds
+    legend-worthy traces (Plotly names them "legend", "legend2", ...)."""
+    if not traces:
+        return
+    legend_name = "legend" if legend_index == 1 else f"legend{legend_index}"
+    for tr in traces:
+        tr.update(legend=legend_name)
+    lo, hi = _row_y_domain(fig, traces[0])
+    fig.layout[legend_name] = dict(y=(lo + hi) / 2, yanchor="middle", x=1.02, xanchor="left")
 
 
 def _copy_yaxis(fig, src_yaxis, row, secondary_y=False):
@@ -755,11 +924,12 @@ def quicklook_plot_plotly(
         rows=n_plots,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=min(0.25 / n_plots, 0.04),
+        vertical_spacing=min(0.1 / n_plots, 0.015),
         specs=[[{"secondary_y": True}] for _ in range(n_plots)],
     )
 
     rpw_colorbar_shown = False
+    legend_count = 0
     for i, panel in enumerate(plots_todo):
         row = i + 1
         origin, ptype, detail = panel.split("_", 2)
@@ -782,15 +952,23 @@ def quicklook_plot_plotly(
                 )
                 fig.add_trace(spec_fig.data[0], row=row, col=1, secondary_y=False)
                 _copy_yaxis(fig, spec_fig.layout.yaxis, row)
+                if show_cbar:
+                    fig.data[-1].colorbar.update(**_colorbar_domain(fig, fig.data[-1]))
                 if rpw_invert_yaxis:
                     _invert_yaxis(fig, secondary_y=False, row=row, col=1)
                 if ptype == "overlay":
+                    start_idx = len(fig.data)
                     for tr in rpw_curve_traces(psd, freqs, smoothing_pts=rpw_smoothing_points, lw=linewidth):
                         fig.add_trace(tr, row=row, col=1, secondary_y=True)
+                    legend_count += 1
+                    _assign_row_legend(fig, fig.data[start_idx:], legend_count)
             elif ptype == "curve":
                 freq_val = float(detail)
+                start_idx = len(fig.data)
                 for tr in rpw_curve_traces(psd, [freq_val], smoothing_pts=rpw_smoothing_points, lcolor=["black"], lw=linewidth):
                     fig.add_trace(tr, row=row, col=1, secondary_y=False)
+                legend_count += 1
+                _assign_row_legend(fig, fig.data[start_idx:], legend_count)
 
         elif origin == "stix":
             if ptype in ("spec", "overlay"):
@@ -803,24 +981,36 @@ def quicklook_plot_plotly(
                 )
                 fig.add_trace(spec_fig.data[0], row=row, col=1, secondary_y=False)
                 _copy_yaxis(fig, spec_fig.layout.yaxis, row)
+                fig.data[-1].colorbar.update(**_colorbar_domain(fig, fig.data[-1]))
                 if ptype == "overlay":
+                    start_idx = len(fig.data)
                     for tr in stix_counts_traces(
-                        stix_counts, integrate_bins=stix_energy_bins, smoothing_pts=stix_smoothing_points, lw=linewidth
+                        stix_counts,
+                        integrate_bins=stix_energy_bins,
+                        smoothing_pts=stix_smoothing_points,
+                        lw=linewidth,
+                        floor_at_one=stix_curves_ylogscale,
                     ):
                         fig.add_trace(tr, row=row, col=1, secondary_y=True)
                     fig.update_yaxes(
                         type="log" if stix_curves_ylogscale else "linear", row=row, col=1, secondary_y=True
                     )
+                    legend_count += 1
+                    _assign_row_legend(fig, fig.data[start_idx:], legend_count)
             elif ptype == "curve":
+                start_idx = len(fig.data)
                 for tr in stix_counts_traces(
                     stix_counts,
                     integrate_bins=stix_energy_bins,
                     date_range=d_range,
                     smoothing_pts=stix_smoothing_points,
                     lw=linewidth,
+                    floor_at_one=stix_curves_ylogscale,
                 ):
                     fig.add_trace(tr, row=row, col=1, secondary_y=False)
                 fig.update_yaxes(type="log" if stix_curves_ylogscale else "linear", row=row, col=1, secondary_y=False)
+                legend_count += 1
+                _assign_row_legend(fig, fig.data[start_idx:], legend_count)
 
         elif origin == "epd":
             epd_fig = epd_flux_figure(
@@ -832,9 +1022,12 @@ def quicklook_plot_plotly(
                 round_epd_label=epd_round_label,
                 resample=epd_resample,
             )
+            start_idx = len(fig.data)
             for tr in epd_fig.data:
                 fig.add_trace(tr, row=row, col=1, secondary_y=False)
             _copy_yaxis(fig, epd_fig.layout.yaxis, row)
+            legend_count += 1
+            _assign_row_legend(fig, fig.data[start_idx:], legend_count)
 
     fig.update_xaxes(range=[start, end], showgrid=True)
     fig.update_xaxes(title_text=label_obstime, row=n_plots, col=1)

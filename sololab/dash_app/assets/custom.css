@@ -1,3 +1,69 @@
+:root {
+    --sololab-accent: #1E90FF;
+    --sololab-accent-hover: #1873cc;
+    --sololab-topbar-bg: #C1683C;
+}
+
+.topbar {
+    background-color: var(--sololab-topbar-bg) !important;
+}
+
+.app-shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.app-body {
+    display: flex;
+    flex: 1;
+    align-items: stretch;
+}
+
+.sidebar {
+    flex: 0 0 220px;
+    padding: 1rem 0.75rem;
+    border-right: 1px solid #dee2e6;
+}
+
+.sidebar-section-title {
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: #6c757d;
+    margin-bottom: 0.5rem;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.status-cell {
+    overflow: hidden;
+    cursor: help;
+}
+
+.status-badge {
+    display: block;
+    width: 100%;
+    text-align: center;
+}
+
+.main-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.bottom-bar {
+    padding: 0.5rem 1rem;
+    border-top: 1px solid #dee2e6;
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
 .upload-box {
     border: 1px dashed #adb5bd;
     border-radius: 4px;
@@ -9,4 +75,62 @@
 
 .upload-box:hover {
     background: #eef1f4;
+}
+
+/* --- Dodger-blue accent (#1E90FF), layered on the FLATLY (light) theme --- */
+
+.navbar-brand {
+    color: #fff !important;
+    font-weight: 700;
+    font-size: 1.4rem;
+}
+
+.btn-primary {
+    background-color: var(--sololab-accent) !important;
+    border-color: var(--sololab-accent) !important;
+}
+
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active {
+    background-color: var(--sololab-accent-hover) !important;
+    border-color: var(--sololab-accent-hover) !important;
+}
+
+.btn-outline-primary {
+    color: var(--sololab-accent) !important;
+    border-color: var(--sololab-accent) !important;
+}
+
+.btn-outline-primary:hover {
+    background-color: var(--sololab-accent) !important;
+    border-color: var(--sololab-accent) !important;
+    color: #fff !important;
+}
+
+.nav-pills .nav-link.active {
+    background-color: var(--sololab-accent) !important;
+}
+
+.nav-tabs .nav-link.active {
+    background-color: var(--sololab-accent) !important;
+    border-color: var(--sololab-accent) !important;
+    color: #fff !important;
+}
+
+.sidebar a:not(.btn),
+.bottom-bar a:not(.btn),
+a:not(.btn) {
+    color: var(--sololab-accent);
+}
+
+.sidebar a:not(.btn):hover,
+.bottom-bar a:not(.btn):hover,
+a:not(.btn):hover {
+    color: var(--sololab-accent-hover);
+}
+
+.form-check-input:checked {
+    background-color: var(--sololab-accent) !important;
+    border-color: var(--sololab-accent) !important;
 }

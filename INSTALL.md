@@ -171,12 +171,13 @@ python -m venv .venv-dash
 This step downloads and installs numpy, scipy, pandas, astropy, cdflib, and
 the rest - it can take a few minutes on the first run.
 
-`requirements.txt` also includes `stixdcpy`, used only by the desktop app's
-"Download from STIX Data Center..." button (in the Import STIX dialog) to
-fetch a spectrogram file for a given date/time range directly, instead of
-downloading one manually first. Everything else works normally without it.
-The equivalent RPW-HFR/RPW-TNR "Download from CDAWeb..." buttons need no
-extra package - they use the standard library only.
+Both requirements files include `stixdcpy`, used by each app's own
+"Download from STIX Data Center..." button/section (in the Import STIX
+dialog/page) to fetch a spectrogram file for a given date/time range
+directly, instead of downloading one manually first. Everything else works
+normally without it. The equivalent RPW-HFR/RPW-TNR "Download from
+CDAWeb..." buttons need no extra package - they use the standard library
+only.
 
 ---
 
@@ -238,10 +239,11 @@ first, it's not included by default since the web app doesn't need it).
   `sunpy` directly. `pip install h5py` fixes it; both requirements files already include it, so a
   fresh install from `requirements.txt`/`requirements-dash.txt` shouldn't hit this at all.
 - **"Downloading STIX data requires the optional 'stixdcpy' package"** - only
-  shown if you click "Download from STIX Data Center..." without `stixdcpy`
-  installed (e.g. `pip install -r requirements.txt` ran before it was added,
-  or you installed packages individually). `pip install stixdcpy` fixes it;
-  everything else in the app works fine without it.
+  shown if you click "Download from STIX Data Center..." (desktop or web app)
+  without `stixdcpy` installed (e.g. `pip install -r requirements.txt` /
+  `requirements-dash.txt` ran before it was added, or you installed packages
+  individually). `pip install stixdcpy` fixes it; everything else in the app
+  works fine without it.
 - **Windows: "running scripts is disabled on this system"** - see
   [step 2](#windows), Option A (call `python.exe` directly, skip activation
   entirely).
