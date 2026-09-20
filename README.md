@@ -36,7 +36,10 @@ GUI — see [`sololab_examples.ipynb`](sololab_examples.ipynb).
 
 ## Quick start
 
-See [`INSTALL.md`](INSTALL.md) for setup on Windows/macOS/Linux (no compiler needed). Then:
+New to SoloLab or to running Python tools in general? Start with
+[`sololab_usersguide.html`](sololab_usersguide.html) instead - a plain-language, no-assumed-experience
+walkthrough covering install and app usage on Windows/macOS/Linux. Otherwise, see
+[`INSTALL.md`](INSTALL.md) for the full setup reference (no compiler needed). Then:
 
 ```bash
 python test_installation.py      # verify your environment

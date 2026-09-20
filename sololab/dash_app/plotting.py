@@ -688,18 +688,28 @@ def epd_bkg_figure(bkg, bkg_std, energies_ept, particle, height=380):
     which a log axis can't place at all, so the *displayed* value only is
     floored at 0.1 (same floor as epd_flux_figure's light curve) purely so
     the point still renders; the underlying bkg/bkg_std data isn't
-    modified, and error bars use the true (unfloored) std."""
+    modified.
+
+    Error bars use half the std (a full +-1 std band was visually too wide
+    against the background values themselves) and are asymmetric: the
+    downward half is clipped so it never reaches 0 or below, which a log
+    axis cannot represent at all (Plotly would otherwise silently drop
+    that whisker); the upward half is left as computed since large values
+    render fine on a log axis."""
     bkg = np.asarray(bkg)
     n = len(bkg)
     low = np.asarray(energies_ept[f"{particle}_Bins_Low_Energy"])[:n]
     width = np.asarray(energies_ept[f"{particle}_Bins_Width"])[:n]
     mid_energy = low + width / 2
+    y_display = np.clip(bkg, 0.1, None)
     error_y = None
     if bkg_std is not None:
-        error_y = dict(type="data", array=np.asarray(bkg_std)[:n], visible=True)
+        half_std = np.asarray(bkg_std)[:n] / 2
+        minus = np.clip(np.minimum(half_std, y_display - 0.01), 0, None)
+        error_y = dict(type="data", array=half_std, arrayminus=minus, visible=True)
 
     fig = go.Figure(
-        go.Scatter(x=mid_energy, y=np.clip(bkg, 0.1, None), mode="markers+lines", name="Background", error_y=error_y)
+        go.Scatter(x=mid_energy, y=y_display, mode="markers+lines", name="Background", error_y=error_y)
     )
     fig.update_xaxes(title=f"{particle} Energy [MeV]", type="log")
     fig.update_yaxes(title=f"{particle} Background Flux<br>[(cm^2 sr s MeV)^-1]", type="log")

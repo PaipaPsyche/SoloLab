@@ -1,5 +1,10 @@
 # Installation Guide
 
+> **New to all this?** If terms like "virtual environment" or "wheel" below aren't familiar, start
+> with [`sololab_usersguide.html`](sololab_usersguide.html) instead - it's a shorter, plainer-language
+> walkthrough of the same steps (open it by double-clicking the file). Come back here if you want
+> more detail or hit something it doesn't cover.
+
 SoloLab ships as **two separate apps** that share the same core Python package
 (`sololab/`), each with its own dependency list:
 

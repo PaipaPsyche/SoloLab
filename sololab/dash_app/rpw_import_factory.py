@@ -83,14 +83,24 @@ def make_rpw_import_layout(data_type):
                                                     max=datetime.now().year + 1,
                                                     value=datetime.now().year,
                                                 ),
-                                                width=4,
+                                                width=3,
+                                            ),
+                                            dbc.Col(
+                                                dbc.Input(
+                                                    id=f"{p}-search-month",
+                                                    type="number",
+                                                    min=1,
+                                                    max=12,
+                                                    value=datetime.now().month,
+                                                ),
+                                                width=3,
                                             ),
                                             dbc.Col(
                                                 dbc.Button(
                                                     "Query available dates", id=f"{p}-search-btn",
                                                     color="secondary", outline=True, className="w-100",
                                                 ),
-                                                width=8,
+                                                width=6,
                                             ),
                                         ],
                                         className="mb-2",
@@ -247,20 +257,25 @@ def register_rpw_import_callbacks(data_type):
         Output(f"{p}-alert", "is_open", allow_duplicate=True),
         Input(f"{p}-search-btn", "n_clicks"),
         State(f"{p}-search-year", "value"),
+        State(f"{p}-search-month", "value"),
         prevent_initial_call=True,
     )
-    def search(n_clicks, year):
+    def search(n_clicks, year, month):
         if not n_clicks:
             raise PreventUpdate
-        if year is None:
-            return [], None, "Enter a valid year.", "warning", True
+        if year is None or month is None:
+            return [], None, "Enter a valid year and month.", "warning", True
         try:
+            # CDAWeb only publishes a per-year listing (see
+            # rpw_cdaweb_list_available_dates's docstring) - narrowing to one
+            # month is done here rather than adding a second remote query.
             available = rpw_read.rpw_cdaweb_list_available_dates(data_type, int(year))
+            available = {d: f for d, f in available.items() if d.month == int(month)}
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unhandled error in callback")
             return [], None, str(exc), "danger", True
         if not available:
-            return [], None, f"No RPW-{data_type.upper()} L3 files found for {year} on CDAWeb.", "warning", True
+            return [], None, f"No RPW-{data_type.upper()} L3 files found for {int(year)}-{int(month):02d} on CDAWeb.", "warning", True
 
         type_label = data_type.upper()
         options = [
