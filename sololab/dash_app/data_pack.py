@@ -12,6 +12,7 @@ bkg_poll_function for STIX, bkg_option/bkg_poll_function for RPW), not the
 desktop's separate bkg_start/bkg_end/bkg_file keys. A .pkl saved by one is
 therefore not loadable by the other.
 """
+import gzip
 import pickle
 from datetime import datetime
 
@@ -36,18 +37,31 @@ def build_payload(sid):
         },
         "epd": {
             "meta": session_store.get(sid, "epd_meta"),
-            "df_protons": session_store.get(sid, "epd_protons_df"),
-            "df_electrons": session_store.get(sid, "epd_electrons_df"),
+            "final_protons": session_store.get(sid, "epd_protons_final"),
+            "final_electrons": session_store.get(sid, "epd_electrons_final"),
             "energies": session_store.get(sid, "epd_energies"),
+            # unlike STIX/RPW, EPD's background isn't embedded in the
+            # final data itself - it lives in its own session_store slot
+            # (see import_epd.py's epd_load_click/epd_preview_with_bkg),
+            # so it needs saving separately too.
+            "background": session_store.get(sid, "epd_background"),
+            "background_std": session_store.get(sid, "epd_background_std"),
         },
     }
 
 
 def payload_to_bytes(payload):
-    return pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+    """gzip-compressed pickle - the payload is mostly numpy arrays/pandas
+    DataFrames (STIX counts, RPW PSDs, a full day of EPD per-channel flux),
+    which compress well (repeated/near-zero values, shared dtypes)."""
+    return gzip.compress(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
 
 
 def bytes_to_payload(blob):
+    """Sniffs the gzip magic bytes so a .pkl saved before compression was
+    added still loads."""
+    if blob[:2] == b"\x1f\x8b":
+        blob = gzip.decompress(blob)
     return pickle.loads(blob)
 
 
@@ -87,10 +101,23 @@ def apply_payload(sid, payload):
     epd = payload.get("epd") or {}
     if epd.get("energies") is not None:
         meta = epd.get("meta") or {}
-        session_store.set(sid, "epd_protons_df", epd.get("df_protons"))
-        session_store.set(sid, "epd_electrons_df", epd.get("df_electrons"))
+        # "final_*" is the actual plottable data (post background
+        # subtraction, if any); fall back to the older pre-fix pack format's
+        # raw "df_*" so a pack saved before this fix still loads (without
+        # its background subtraction, since the bkg time range was never
+        # saved either way).
+        final_protons = epd.get("final_protons", epd.get("df_protons"))
+        final_electrons = epd.get("final_electrons", epd.get("df_electrons"))
+        if final_protons is not None:
+            session_store.set(sid, "epd_protons_final", final_protons)
+        if final_electrons is not None:
+            session_store.set(sid, "epd_electrons_final", final_electrons)
         session_store.set(sid, "epd_energies", epd.get("energies"))
         session_store.set(sid, "epd_meta", meta)
+        if epd.get("background") is not None:
+            session_store.set(sid, "epd_background", epd["background"])
+        if epd.get("background_std") is not None:
+            session_store.set(sid, "epd_background_std", epd["background_std"])
         status["epd"] = {
             "loaded": True,
             "date": meta.get("date"),

@@ -29,7 +29,7 @@ def smooth(y, pts):
     return np.convolve(y, ones, mode="same")
 
 
-def log_symmetric_error_y(y, std, scale=1.0):
+def log_symmetric_error_y(y, std, scale=1.0, max_decades=4):
     """error_y dict whose whiskers render as equal-length on a log-scale
     axis. A plain +-std bar is symmetric in linear space but looks stretched
     toward low values once log-transformed (log(y+std)-log(y) is smaller
@@ -38,12 +38,22 @@ def log_symmetric_error_y(y, std, scale=1.0):
     log10-space instead (same +-factor on y) and converting back fixes that,
     and as a side effect the lower whisker can never reach/cross zero, so no
     separate floor/clip is needed. `scale` shrinks the underlying std before
-    conversion (e.g. 0.5 for a half-std band)."""
+    conversion (e.g. 0.5 for a half-std band).
+
+    `max_decades` caps how many orders of magnitude the whiskers can span
+    around y. Needed for background estimators like median/min/a low
+    percentile, which often land on (or very near) 0 for spiky count/flux
+    data whose std is still large - dividing that std by a near-zero y
+    blows the ratio up to the thousands, and 10**thousands renders as a
+    whisker reaching 10^200+ that stretches the whole axis and flattens the
+    real curve. mean/max rarely land near 0 for the same data, so their
+    (much smaller) ratio is well under this cap and unaffected."""
     y = np.asarray(y, dtype=float)
     std = np.asarray(std, dtype=float) * scale
     log_half_width = np.zeros_like(y)
     valid = (y > 0) & np.isfinite(std)
     log_half_width[valid] = std[valid] / (y[valid] * np.log(10))
+    log_half_width = np.clip(log_half_width, 0, max_decades)
     factor = np.power(10.0, log_half_width)
     upper = y * (factor - 1)
     lower = y - y / factor
