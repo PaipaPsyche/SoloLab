@@ -11,7 +11,7 @@ import logging
 import os
 import shutil
 import tempfile
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import dash
 import dash_bootstrap_components as dbc
@@ -34,17 +34,17 @@ logger = logging.getLogger(__name__)
 
 dash.register_page(__name__, path="/import/stix", name="Import STIX")
 
-# The STIX Data Center search fields drop seconds (unlike the rest of the
-# app's DT_INPUT_FMT, used for background time ranges elsewhere) - typing a
-# search window down to the second is inconvenient and STIX product files
-# span minutes/hours anyway, so second-level precision isn't useful here.
-_SEARCH_DT_FMT = "%Y-%m-%d %H:%M"
-
-
-def _parse_search_dt(value):
-    if not value:
-        return None
-    return datetime.strptime(value.strip(), _SEARCH_DT_FMT)
+# Search window = one start date/time (calendar + HH:MM) plus a duration,
+# rather than two independently-typed date/time bounds - simpler to fill
+# in correctly than typing an end date by hand.
+_STIX_SEARCH_DURATIONS = {
+    "1 hour": timedelta(hours=1),
+    "3 hours": timedelta(hours=3),
+    "12 hours": timedelta(hours=12),
+    "1 day": timedelta(days=1),
+    "3 days": timedelta(days=3),
+    "7 days": timedelta(days=7),
+}
 
 
 def _download_stix_bytes(file_id):
@@ -86,21 +86,29 @@ layout = dbc.Container(
                                 dbc.Row(
                                     [
                                         dbc.Col(
-                                            dbc.Input(
-                                                id="stix-search-start",
-                                                type="text",
-                                                placeholder="From: YYYY-MM-DD HH:MM",
-                                            )
+                                            dcc.DatePickerSingle(
+                                                id="stix-search-date",
+                                                date=date.today().isoformat(),
+                                                display_format="YYYY-MM-DD",
+                                                className="d-block",
+                                            ),
+                                            width=5,
                                         ),
                                         dbc.Col(
-                                            dbc.Input(
-                                                id="stix-search-end",
-                                                type="text",
-                                                placeholder="To: YYYY-MM-DD HH:MM",
-                                            )
+                                            dbc.Input(id="stix-search-time", type="text", placeholder="HH:MM", value="00:00"),
+                                            width=3,
+                                        ),
+                                        dbc.Col(
+                                            dcc.Dropdown(
+                                                id="stix-search-duration",
+                                                options=list(_STIX_SEARCH_DURATIONS),
+                                                value="1 day",
+                                                clearable=False,
+                                            ),
+                                            width=4,
                                         ),
                                     ],
-                                    className="mb-2",
+                                    className="mb-2 g-1",
                                 ),
                                 dcc.Dropdown(
                                     id="stix-search-product",
@@ -259,21 +267,22 @@ def on_stix_upload(contents, filename, sid):
     Output("stix-alert", "color", allow_duplicate=True),
     Output("stix-alert", "is_open", allow_duplicate=True),
     Input("stix-search-btn", "n_clicks"),
-    State("stix-search-start", "value"),
-    State("stix-search-end", "value"),
+    State("stix-search-date", "date"),
+    State("stix-search-time", "value"),
+    State("stix-search-duration", "value"),
     State("stix-search-product", "value"),
     prevent_initial_call=True,
 )
-def stix_search(n_clicks, start_str, end_str, product_type):
+def stix_search(n_clicks, date_str, time_str, duration_label, product_type):
     if not n_clicks:
         raise PreventUpdate
+    if not date_str:
+        return [], None, "Choose a start date.", "warning", True
     try:
-        start = _parse_search_dt(start_str)
-        end = _parse_search_dt(end_str)
+        start = datetime.strptime(f"{date_str} {(time_str or '00:00').strip()}", "%Y-%m-%d %H:%M")
     except ValueError:
-        return [], None, "Enter valid dates as YYYY-MM-DD HH:MM.", "warning", True
-    if not start or not end:
-        return [], None, "Enter a start and end date/time to search.", "warning", True
+        return [], None, "Enter a valid start time as HH:MM.", "warning", True
+    end = start + _STIX_SEARCH_DURATIONS.get(duration_label, timedelta(days=1))
     try:
         results = stix_read.stix_query_science_files(
             start.strftime("%Y-%m-%dT%H:%M:00"), end.strftime("%Y-%m-%dT%H:%M:00"), product_type=product_type
