@@ -187,7 +187,19 @@ layout = dbc.Container(
                                             style={"display": "none"},
                                             className="mb-2 mt-1",
                                         ),
-                                        html.Label("Background polling function"),
+                                        html.Label(
+                                            [
+                                                "Background polling function ",
+                                                html.Span("ⓘ", id="stix-bkg-poll-info", style={"cursor": "help", "color": "#6c757d"}),
+                                            ]
+                                        ),
+                                        dbc.Tooltip(
+                                            "\"max\"/\"min\" are unreliable for spiky count data - a single outlier "
+                                            "in the background window becomes the whole subtracted background. "
+                                            "\"mean\" or \"median\" are more robust.",
+                                            target="stix-bkg-poll-info",
+                                            placement="right",
+                                        ),
                                         dcc.Dropdown(
                                             id="stix-bkg-poll",
                                             options=STIX_POLL_OPTIONS,

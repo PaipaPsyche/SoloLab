@@ -273,6 +273,8 @@ def stix_remove_bkg_counts(pathfile,pathbkg=None,stix_bkg_range=None,date_range=
 
 
     # replace ctc/secinfo with corrected info
+    # background subtraction can push counts below the physical floor of 0
+    data_counts_per_sec_nobkg = np.clip(data_counts_per_sec_nobkg, 0, None)
     return_dict = data_L1.copy()
     return_dict["counts_per_sec"] = data_counts_per_sec_nobkg
     return_dict["background"]=bkg_count_spec

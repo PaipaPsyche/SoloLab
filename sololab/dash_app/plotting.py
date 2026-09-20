@@ -22,10 +22,32 @@ from sololab import values
 
 def smooth(y, pts):
     """Port of quicklooks.smooth: simple moving-average via convolution."""
-    if not pts or pts <= 1:
-        return np.asarray(y)
+    y = np.asarray(y)
+    if not pts or pts <= 1 or y.size == 0:
+        return y
     ones = np.ones(pts) / pts
     return np.convolve(y, ones, mode="same")
+
+
+def log_symmetric_error_y(y, std, scale=1.0):
+    """error_y dict whose whiskers render as equal-length on a log-scale
+    axis. A plain +-std bar is symmetric in linear space but looks stretched
+    toward low values once log-transformed (log(y+std)-log(y) is smaller
+    than log(y)-log(y-std)), because a fixed additive step is a bigger
+    fraction of y going down than going up. Making the error symmetric in
+    log10-space instead (same +-factor on y) and converting back fixes that,
+    and as a side effect the lower whisker can never reach/cross zero, so no
+    separate floor/clip is needed. `scale` shrinks the underlying std before
+    conversion (e.g. 0.5 for a half-std band)."""
+    y = np.asarray(y, dtype=float)
+    std = np.asarray(std, dtype=float) * scale
+    log_half_width = np.zeros_like(y)
+    valid = (y > 0) & np.isfinite(std)
+    log_half_width[valid] = std[valid] / (y[valid] * np.log(10))
+    factor = np.power(10.0, log_half_width)
+    upper = y * (factor - 1)
+    lower = y - y / factor
+    return dict(type="data", array=upper, arrayminus=lower, visible=True)
 
 
 def _as_datetime_array(time_data):
@@ -286,15 +308,16 @@ def stix_bkg_figure(counts, height=380):
     energies = energies[:min_channels]
     bkg_counts = bkg_counts[:min_channels]
     bkg_std = counts.get("background_std")
+    y = bkg_counts / energies
     error_y = None
     if bkg_std is not None:
         bkg_std = np.asarray(bkg_std)[:min_channels]
-        error_y = dict(type="data", array=bkg_std / energies, visible=True)
+        error_y = log_symmetric_error_y(y, bkg_std / energies)
 
     fig = go.Figure(
         go.Scatter(
             x=energies,
-            y=bkg_counts / energies,
+            y=y,
             mode="lines+markers",
             name="Background",
             error_y=error_y,
@@ -500,7 +523,7 @@ def rpw_bkg_figure(psd, height=380):
             mode="markers+lines",
             name=f"Used Background ({psd.get('polling_function')})",
             line=dict(color="red"),
-            error_y=dict(type="data", array=bkg_std, visible=True) if bkg_std is not None else None,
+            error_y=log_symmetric_error_y(bkg, bkg_std) if bkg_std is not None else None,
         )
     )
     fig.add_trace(
@@ -529,7 +552,7 @@ def rpw_bkg_combined_figure(hfr_psd, tnr_psd, height=380):
         frequency = np.asarray(psd["frequency"])
         bkg = np.asarray(psd["bkg"])[:, 0]
         bkg_std = psd.get("bkg_std")
-        error_y = dict(type="data", array=bkg_std, visible=True) if bkg_std is not None else None
+        error_y = log_symmetric_error_y(bkg, bkg_std) if bkg_std is not None else None
         fig.add_trace(
             go.Scatter(
                 x=frequency,
@@ -691,11 +714,9 @@ def epd_bkg_figure(bkg, bkg_std, energies_ept, particle, height=380):
     modified.
 
     Error bars use half the std (a full +-1 std band was visually too wide
-    against the background values themselves) and are asymmetric: the
-    downward half is clipped so it never reaches 0 or below, which a log
-    axis cannot represent at all (Plotly would otherwise silently drop
-    that whisker); the upward half is left as computed since large values
-    render fine on a log axis."""
+    against the background values themselves), converted to a log-symmetric
+    band (see log_symmetric_error_y) so both whiskers render the same visual
+    length on the log axis and the downward one can never reach/cross 0."""
     bkg = np.asarray(bkg)
     n = len(bkg)
     low = np.asarray(energies_ept[f"{particle}_Bins_Low_Energy"])[:n]
@@ -704,9 +725,7 @@ def epd_bkg_figure(bkg, bkg_std, energies_ept, particle, height=380):
     y_display = np.clip(bkg, 0.1, None)
     error_y = None
     if bkg_std is not None:
-        half_std = np.asarray(bkg_std)[:n] / 2
-        minus = np.clip(np.minimum(half_std, y_display - 0.01), 0, None)
-        error_y = dict(type="data", array=half_std, arrayminus=minus, visible=True)
+        error_y = log_symmetric_error_y(y_display, np.asarray(bkg_std)[:n], scale=0.5)
 
     fig = go.Figure(
         go.Scatter(x=mid_energy, y=y_display, mode="markers+lines", name="Background", error_y=error_y)
@@ -917,6 +936,15 @@ def quicklook_plot_plotly(
     if "epd" in display:
         time_arrays["epd"] = epd_data.index.to_numpy()
     start, end, label_obstime = resolve_common_time_range(time_arrays, date_range)
+    if start >= end:
+        # the selected instruments' time ranges don't overlap (or the
+        # "Restrict date range" window misses one of them) - every panel
+        # would silently filter down to zero rows and render blank, so
+        # fail loudly here instead.
+        raise ValueError(
+            "Selected instruments/date range have no overlapping time - nothing to plot. "
+            f"Common window would be {start} to {end}."
+        )
     d_range = (start, end)
 
     plots_todo = resolve_combined_panels(display, rpw_mode, stix_mode, hfr_frequencies, tnr_frequencies)
@@ -927,8 +955,16 @@ def quicklook_plot_plotly(
     common_vmin = common_vmax = None
     if "tnr" in display and "hfr" in display:
         multi = 1 if rpw_units == "SFU" else 1e-22
-        common_vmin = min(np.min(tnr_psd["v"]), np.min(hfr_psd["v"])) * multi
-        common_vmax = max(np.max(tnr_psd["v"]), np.max(hfr_psd["v"])) * multi
+        # only positive, finite values are valid on the log color scale
+        # rpw_psd_figure applies (same guard it uses internally via
+        # `where=z > 0`) - a stray non-positive/fill value here would
+        # otherwise make vmin negative, log10(vmin) NaN, and corrupt the
+        # whole combined figure's JSON payload (blanking every panel, not
+        # just RPW's).
+        pos_vals = [v[np.isfinite(v) & (v > 0)] for v in (tnr_psd["v"], hfr_psd["v"])]
+        if all(p.size for p in pos_vals):
+            common_vmin = min(p.min() for p in pos_vals) * multi
+            common_vmax = max(p.max() for p in pos_vals) * multi
 
     fig = make_subplots(
         rows=n_plots,
