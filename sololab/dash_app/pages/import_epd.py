@@ -44,9 +44,11 @@ def _epd_bkg_subtract(df, particle, bkg_start, bkg_end, poll_function):
     bkg_end], subtract it from every row, and keep the poll result + std
     per channel so the background can be plotted (mirrors
     stix_read.stix_remove_bkg_counts / rpw_read.rpw_create_PSD's bkg
-    tracking). Not floored here - the true (possibly negative) subtracted
-    value is kept in the data; plotting.epd_flux_figure floors at 0.1 only
-    when actually rendering on its always-log Y-axis."""
+    tracking). Floored at 0 like the other two instruments (flux can't be
+    negative) - matters most with a poll function like "max", which can
+    subtract a value bigger than nearly every other point in a spiky
+    timeseries; plotting.epd_flux_figure's own 0.1 floor is separate, only
+    needed because 0 itself can't be placed on the always-log Y-axis."""
     flux_key = f"{particle}_Flux"
     flux = df[flux_key]
     mask = (df.index >= bkg_start) & (df.index <= bkg_end)
@@ -55,7 +57,7 @@ def _epd_bkg_subtract(df, particle, bkg_start, bkg_end, poll_function):
     bkg = func(window, axis=0)
     bkg_std = np.std(window, axis=0)
     df_out = df.copy()
-    df_out[flux_key] = flux.values - bkg
+    df_out[flux_key] = np.clip(flux.values - bkg, 0, None)
     return df_out, bkg, bkg_std
 
 
@@ -133,7 +135,19 @@ def _layout():
                                             style={"display": "none"},
                                             className="mb-2 mt-1",
                                         ),
-                                        html.Label("Background polling function"),
+                                        html.Label(
+                                            [
+                                                "Background polling function ",
+                                                html.Span("ⓘ", id="epd-bkg-poll-info", style={"cursor": "help", "color": "#6c757d"}),
+                                            ]
+                                        ),
+                                        dbc.Tooltip(
+                                            "\"max\"/\"min\" are unreliable for spiky count data - a single outlier "
+                                            "in the background window becomes the whole subtracted background. "
+                                            "\"mean\" or \"median\" are more robust.",
+                                            target="epd-bkg-poll-info",
+                                            placement="right",
+                                        ),
                                         dcc.Dropdown(
                                             id="epd-bkg-poll",
                                             options=EPD_POLL_OPTIONS,
