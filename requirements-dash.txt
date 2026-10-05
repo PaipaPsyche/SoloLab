@@ -4,11 +4,13 @@ pandas
 astropy
 cdflib
 stixdcpy  # optional: only needed for the Import STIX page's "download from STIX Data Center" search/download (sololab.stix_read.stix_query_science_files/stix_download_file)
+stixpy==0.3.0  # optional: only needed for Plot Preferences' STIX "imaging" plot type (sololab.stix_imaging). Pinned - Alpha-status package under active development; see sololab/stix_imaging.py's module docstring for a confirmed upstream bug in this version that currently blocks reconstruction
+xrayvisim==0.2.1  # optional: stixpy's own imaging-reconstruction dependency, imported as `xrayvision`
 h5py  # not used by sololab directly - silences a SunpyUserWarning triggered when solo-epd-loader imports sunpy.io._cdf at startup
 solo-epd-loader>=0.4.4,<0.5  # EPD energy-bin label shape changed between versions before 0.4.4 (see sololab.dash_app.plotting.epd_bin_text); test before widening this range
 seaborn
 matplotlib
-dash
+dash[diskcache]  # [diskcache] extra (multiprocess, dill) needed for DiskcacheManager - powers STIX Imaging's Sequence-mode progress bar (sololab.dash_app.app.background_callback_manager)
 dash-bootstrap-components
 plotly
 diskcache

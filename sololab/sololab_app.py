@@ -577,7 +577,7 @@ class DownloadStixDataDialog(QDialog):
             return
 
         self._results = results
-        type_label = "PIXEL" if product_type == "xray-l1" else "SPEC"
+        type_label = "PIXEL" if product_type == "xray-cpd" else "SPEC"
         for r in results:
             t0 = datetime.fromisoformat(r.get("observation_time_range", ["?", "?"])[0])
             filename = r.get("url", "").rsplit("/", 1)[-1] or f"file_id={r.get('file_id')}"

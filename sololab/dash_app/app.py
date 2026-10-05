@@ -13,7 +13,8 @@ import uuid
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, callback, dcc, html
+import diskcache
+from dash import Input, Output, State, callback, dcc, html, DiskcacheManager
 
 from sololab.dash_app.constants import DEFAULT_INSTRUMENT_STATUS, DEFAULT_PLOT_PREFS
 from sololab.dash_app.session_store import session_store
@@ -29,12 +30,24 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
+# Backs Dash's background callbacks (currently only STIX Imaging's
+# run_stix_imaging, for Sequence-mode progress reporting) - a separate
+# diskcache.Cache instance from session_store.py's, matching Dash's own
+# documented DiskcacheManager pattern (results/progress cache, not
+# per-session app data - different lifetime/TTL semantics, kept apart).
+_background_callback_cache_dir = os.environ.get(
+    "SOLOLAB_CALLBACK_CACHE_DIR",
+    os.path.join(os.path.dirname(__file__), ".callback_cache"),
+)
+background_callback_manager = DiskcacheManager(diskcache.Cache(_background_callback_cache_dir))
+
 app = dash.Dash(
     __name__,
     use_pages=True,
     external_stylesheets=[dbc.themes.FLATLY],
     suppress_callback_exceptions=True,
     title="SoloLab",
+    background_callback_manager=background_callback_manager,
 )
 server = app.server
 
@@ -136,6 +149,18 @@ sidebar = html.Div(
                         dbc.NavLink("Plot Data", href="/plot-prefs", active="exact"),
                         dbc.NavLink("Combined Plot", href="/combined-plot", active="exact"),
                     ],
+                    vertical=True,
+                    pills=True,
+                ),
+            ],
+            className="sidebar-section",
+        ),
+        html.Hr(),
+        html.Div(
+            [
+                html.Div("Imaging", className="sidebar-section-title"),
+                dbc.Nav(
+                    [dbc.NavLink("STIX Imaging", href="/imaging/stix", active="exact")],
                     vertical=True,
                     pills=True,
                 ),

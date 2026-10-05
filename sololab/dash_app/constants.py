@@ -18,7 +18,7 @@ STIX_POLL_DEFAULT = "mean"
 RPW_POLL_OPTIONS = ["max", "mean", "median", "min", "P_25", "P_75"]
 RPW_POLL_DEFAULT = "median"
 
-EPD_POLL_OPTIONS = ["mean", "median", "min", "max", "P_25", "P_75"]
+EPD_POLL_OPTIONS = STIX_POLL_OPTIONS
 EPD_POLL_DEFAULT = "mean"
 
 EPD_RESAMPLE_OPTIONS = ["30sec", "1min", "2min", "5min", "10min"]
@@ -27,6 +27,14 @@ EPD_PARTICLE_OPTIONS = ["Electron", "Proton"]
 
 PLOT_TYPE_OPTIONS = ["spectrogram", "time profiles", "overlay"]
 RPW_OVERLAP_OPTIONS = ["Only TNR", "Only HFR", "Both"]
+
+# "em" (stixpy.imaging.em.em) is deliberately excluded: verified against a
+# real stixpy 0.3.0 install that it has its own separate, unrelated bug
+# (idx defaulting is inverted - `if idx is not None: idx = [...]` instead of
+# `if idx is None`, stixpy/imaging/em.py) on top of an unclear countrates
+# input shape - see sololab/stix_imaging.py's module docstring.
+STIX_IMAGING_ALGORITHMS = ["backprojection", "clean", "mem_ge"]
+STIX_IMAGING_ALGORITHM_DEFAULT = "backprojection"
 
 # Fixed preview channels/frequencies used by the import-dialog "Plot Preview"
 # buttons (independent of the Plot Preferences selections) - matches the
@@ -79,7 +87,7 @@ DEFAULT_PLOT_PREFS = {
 }
 
 DEFAULT_INSTRUMENT_STATUS = {
-    "stix": {"loaded": False},
+    "stix": {"loaded": False, "pixel_data": False},
     "rpw_hfr": {"loaded": False},
     "rpw_tnr": {"loaded": False},
     "epd": {"loaded": False},
