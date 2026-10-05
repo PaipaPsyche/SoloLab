@@ -97,18 +97,22 @@ def make_rpw_import_layout(data_type):
                                             ),
                                             dbc.Col(
                                                 dbc.Button(
-                                                    "Query available dates", id=f"{p}-search-btn",
-                                                    color="secondary", outline=True, className="w-100",
+                                                    "\U0001F50D", id=f"{p}-search-btn",
+                                                    color="secondary", outline=True,
+                                                    title="Query available dates",
                                                 ),
                                                 width=6,
                                             ),
                                         ],
                                         className="mb-2",
                                     ),
-                                    dcc.Dropdown(
-                                        id=f"{p}-search-results",
-                                        placeholder="Available dates will appear here",
-                                        className="mb-2",
+                                    dbc.Spinner(
+                                        dcc.Dropdown(
+                                            id=f"{p}-search-results",
+                                            placeholder="Available dates will appear here",
+                                            className="mb-2",
+                                        ),
+                                        color="secondary",
                                     ),
                                     dbc.Button(
                                         "Download Selected", id=f"{p}-download-btn", disabled=True,
@@ -189,13 +193,13 @@ def make_rpw_import_layout(data_type):
                         ),
                         md=4,
                     ),
-                    dbc.Col(dcc.Graph(id=f"{p}-preview-graph"), md=8),
+                    dbc.Col(dbc.Spinner(dcc.Graph(id=f"{p}-preview-graph"), color="secondary"), md=8),
                 ]
             ),
             dbc.Modal(
                 [
                     dbc.ModalHeader(dbc.ModalTitle(f"{label} Background")),
-                    dbc.ModalBody(dcc.Graph(id=f"{p}-bkg-graph")),
+                    dbc.ModalBody(dbc.Spinner(dcc.Graph(id=f"{p}-bkg-graph"), color="secondary")),
                 ],
                 id=f"{p}-bkg-modal",
                 is_open=False,

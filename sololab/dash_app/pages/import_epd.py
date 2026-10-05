@@ -178,13 +178,13 @@ def _layout():
                     ),
                     md=4,
                 ),
-                dbc.Col(dcc.Graph(id="epd-preview-graph"), md=8),
+                dbc.Col(dbc.Spinner(dcc.Graph(id="epd-preview-graph"), color="secondary"), md=8),
             ]
         ),
         dbc.Modal(
             [
                 dbc.ModalHeader(dbc.ModalTitle("EPD Background")),
-                dbc.ModalBody(dcc.Graph(id="epd-bkg-graph")),
+                dbc.ModalBody(dbc.Spinner(dcc.Graph(id="epd-bkg-graph"), color="secondary")),
             ],
             id="epd-bkg-modal",
             is_open=False,

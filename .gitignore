@@ -5,6 +5,7 @@ __pycache__/
 # Dash app runtime caches (created automatically, per-machine)
 sololab/dash_app/.session_cache/
 sololab/dash_app/.epd_cache/
+sololab/dash_app/.callback_cache/
 
 # Scratch scripts used only for local testing
 .scratch/
