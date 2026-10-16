@@ -56,6 +56,11 @@ rpw_sweep_reset_threshold = 100
 rpw_hfr_freq_min_khz = 375.0
 rpw_hfr_freq_step_khz = 50.0
 
+# HFR timesteps sampling fewer real channels than this are dropped: they are
+# short high-cadence sweeps (~5 channels) that show up as vertical stripes in
+# the spectrogram (L3 fills them by interpolation). 0 disables the filter.
+rpw_hfr_min_channels = 10
+
 # Valid instrument bounds used to validate/clamp user-entered ranges in the
 # GUI (STIX energy in keV, RPW frequency in kHz).
 stix_energy_range_min_kev = 4
