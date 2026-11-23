@@ -262,7 +262,7 @@ def rpw_read_tnr_cdf(filepath, sensor=4, start_index=0, end_index=-99, data_inde
     'sweep': sweepn_TNR,
     'sensor': sensor,}
 
-def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
+def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99, min_channels=rpw_hfr_min_channels):
 
 
     #import datetime
@@ -363,14 +363,13 @@ def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
             V1[ ind_freq[ ppunt ] ] = agc[ ppunt ]
             freq_hfr1[ ind_freq[ ppunt ] ] = frequency[ ppunt ]
             # print(frequency[ppunt])
-        if np.max ( V1 ) > 0.0:
+        if np.max ( V1 ) > 0.0 and np.sum ( freq_hfr1 > 0 ) >= min_channels:
             V = np.vstack ( (V, V1) )
             freq_hfr = np.vstack ( (freq_hfr, freq_hfr1) )
             sweepn_HFR = np.append ( sweepn_HFR, sweep_num[ ppunt[ 0 ] ] )
+            time = np.append ( time, timerr[ min ( ppunt ) ] )
         V1 = np.zeros ( 321 ) - 99
         freq_hfr1 = np.zeros ( 321 )  # - 99
-        if xm > 0:
-            time = np.append ( time, timerr[ min ( ppunt ) ] )
     # sys.exit ( "sono qui" )
     V = np.transpose ( V[ 1::, : ] )
     time = time[ 1:: ]
@@ -385,16 +384,28 @@ def rpw_read_hfr_cdf(filepath, sensor=9, start_index=0, end_index=-99):
 
     }
 
-def rpw_read_L3_data(filepath):
+def rpw_read_L3_data(filepath, min_channels=0):
 
     cdf_file = cdflib.CDF(filepath)
     psd_sfu_vals = cdf_file.varget('PSD_SFU')
-    
+
     freqs = cdf_file.varget('FREQUENCY')
     epoch = cdf_file.varget('EPOCH')
     time = np.array(cdflib.cdfepoch.to_datetime(epoch) )
     flux= cdf_file.varget('PSD_FLUX')
-    
+
+    # Drop timesteps with fewer than min_channels real (measured) channels.
+    # INTERPOL_FLAG encoding differs by file version: v01 0 = real,
+    # 1 = interpolated; v02 0 = no data, 1 = real, 2 = interpolated,
+    # 3 = real but below background.
+    if min_channels > 0:
+        flag = cdf_file.varget('INTERPOL_FLAG')
+        notes = str(cdf_file.varattsget('INTERPOL_FLAG').get('VAR_NOTES', ''))
+        real = np.isin(flag, (1, 3)) if '1 = real' in notes else flag == 0
+        keep = real.sum(axis=1) >= min_channels
+        print("  Dropped {} timesteps with < {} real channels.".format((~keep).sum(), min_channels))
+        time, psd_sfu_vals, flux = time[keep], psd_sfu_vals[keep], flux[keep]
+
     data = {
     'time':time,
     'voltage':psd_sfu_vals,
@@ -537,8 +548,8 @@ def rpw_get_data(file,sensor=None,filter = tnr_remove_idx):
             data = rpw_read_tnr_cdf(file,sensor=sensor)
             data = rpw_filter_freq_tnr(data,filter=filter)
     elif(datalevel == 'L3'):
-        data = rpw_read_L3_data(file)
-            
+        data = rpw_read_L3_data(file, min_channels=rpw_hfr_min_channels if data_type == "hfr" else 0)
+
 
     data["type"]=data_type
     data["level"] = datalevel
