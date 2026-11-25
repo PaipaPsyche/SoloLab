@@ -89,7 +89,7 @@ def _controls():
             value=["stix", "hfr", "tnr", "epd"],
             inline=True, className="mb-3", **keep,
         ),
-        dbc.Button("⚡ AUTO PLOT", id="ap-plot-btn", className="w-100 btn-autoplot"),
+        dbc.Button("AUTO PLOT", id="ap-plot-btn", className="w-100 btn-autoplot"),
         html.Div(id="ap-notes", className="small text-muted mt-2"),
         html.Hr(),
         dbc.Button("Advanced settings ▾", id="ap-adv-toggle", color="link", className="p-0"),
@@ -97,7 +97,8 @@ def _controls():
             [
                 dbc.Checkbox(id="ap-auto-bkg", label="Auto-bkg", value=False, className="mt-2", **keep),
                 html.Div(
-                    "Per energy/frequency channel, the lowest moving median inside the window is subtracted "
+                    "Moving median over every channel; the window whose channel medians have the smallest "
+                    "norm is the background for all channels "
                     "(window: STIX 5 min, RPW 15 min, EPD max(5 min, 5 resampled points)).",
                     className="small text-muted",
                 ),
@@ -312,9 +313,12 @@ def _get_or_fetch(code, sid, status, start, end, particle="Electron"):
 
 
 def auto_bkg(times, values, window=AUTO_BKG_WINDOW):
-    """values: (time, channel). Per channel, the lowest moving median over
-    `window` (each channel may pick a different window) and the std of that
-    same window. Only full windows count, so a lone early sample can't win."""
+    """values: (time, channel). Moving median of every channel over `window`;
+    the ONE window whose vector of channel medians has the smallest L2 norm
+    is the background for all channels (plus each channel's std in it).
+    Only full windows count, so a lone early sample can't win.
+    ponytail: plain norm, so the brightest channels dominate the choice;
+    normalise channels first if that picks noisy windows."""
     df = pd.DataFrame(np.asarray(values, dtype=float), index=pd.DatetimeIndex(pd.to_datetime(np.asarray(times)))).sort_index()
     full = df.index >= df.index[0] + pd.Timedelta(window)
     if not full.any():  # window shorter than 5 min - fall back to the whole window
@@ -322,9 +326,10 @@ def auto_bkg(times, values, window=AUTO_BKG_WINDOW):
     roll = df.rolling(window)
     med = roll.median().to_numpy()[full]
     std = roll.std().to_numpy()[full]
-    pos = np.argmin(np.where(np.isnan(med), np.inf, med), axis=0)
-    cols = np.arange(df.shape[1])
-    return np.nan_to_num(med[pos, cols]), np.nan_to_num(std[pos, cols])
+    norm = np.sqrt(np.nansum(med**2, axis=1))
+    norm[np.all(np.isnan(med), axis=1)] = np.inf
+    i = int(np.argmin(norm))
+    return np.nan_to_num(med[i]), np.nan_to_num(std[i])
 
 
 def _in_window(times, start, end):
@@ -496,6 +501,7 @@ def auto_plot(n_clicks, date_str, time_str, window, selected, order, stix_ranges
             epd_channels=epd_channels(len(epd_energies[f"{epd_particle}_Bins_Text"])) if epd_df is not None else (),
             epd_particle=epd_particle,
             epd_resample=epd_resample or EPD_RESAMPLE_DEFAULT,
+            epd_zero_as_gap=True,
             fontsize=11,
             linewidth=1.5,
             height_per_panel=200,
@@ -505,7 +511,7 @@ def auto_plot(n_clicks, date_str, time_str, window, selected, order, stix_ranges
         return nu, nu, str(exc), "danger", True, status_out, nu, nu
 
     if use_auto_bkg:
-        notes = notes + ["Auto-bkg subtracted (lowest moving median per channel)."]
+        notes = notes + ["Auto-bkg subtracted (moving-median window with the lowest norm)."]
     if errors:
         return fig, notes, "Skipped - " + " | ".join(errors), "warning", True, status_out, bkg_style, bkg_buttons
     return fig, notes, "", "success", False, status_out, bkg_style, bkg_buttons
@@ -548,7 +554,7 @@ if __name__ == "__main__":
     tt = pd.date_range("2024-01-01", periods=20, freq="1min")
     vals = np.column_stack([np.r_[np.full(10, 5.0), np.full(10, 1.0)], np.r_[np.full(10, 2.0), np.full(10, 9.0)]])
     bk, _ = auto_bkg(tt, vals)
-    assert bk.tolist() == [1.0, 2.0], bk  # each channel picks its own quietest window
+    assert bk.tolist() == [5.0, 2.0], bk  # one shared window: (5, 2) has a smaller norm than (1, 9)
     rs = [{"observation_time_range": ["a", "b"], "url": "x_V02_1.fits"}, {"observation_time_range": ["a", "b"], "url": "x_V04_2.fits"}, {"observation_time_range": ["c", "d"], "url": "y_V01_3.fits"}]
     assert [r["url"] for r in latest_versions(rs)] == ["x_V04_2.fits", "y_V01_3.fits"]
     j = join_psds([a, b])

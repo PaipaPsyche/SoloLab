@@ -741,7 +741,7 @@ def rpw_bkg_combined_figure(hfr_psd, tnr_psd, height=380):
                 x=frequency,
                 y=bkg,
                 mode="markers+lines",
-                name=f"{psd['type'].upper()} Background ({psd.get('polling_function')})",
+                name=f"{psd['type'].upper()} Background<br>({psd.get('polling_function')})",
                 line=dict(color=color),
                 error_y=error_y,
             )
@@ -790,6 +790,7 @@ def epd_flux_figure(
     round_epd_label=True,
     resample=None,
     height=420,
+    zero_as_gap=False,
 ):
     """Port of plot_ept_data, now with real resampling: `resample` (e.g.
     "1min", "30sec") bins the flux series via pandas `.resample(freq).mean()`
@@ -797,7 +798,10 @@ def epd_flux_figure(
     average (which ignored the "Resample" UI control entirely - see
     Backend Fixes item 14). The jet_r 7-color cycle used by matplotlib's
     set_prop_cycle isn't replicated; Plotly's default qualitative palette is
-    used instead (a deliberate visual simplification)."""
+    used instead (a deliberate visual simplification).
+
+    zero_as_gap: leave values <= 0 out (gaps) instead of flooring them at
+    0.1, drawing small markers so isolated non-zero samples stay visible."""
     df = epd_df
     if date_range is not None:
         start, end = date_range
@@ -821,6 +825,10 @@ def epd_flux_figure(
         # EPD's Y-axis is always log (see update_yaxes below) - floor at 0.1
         # so a true zero/negative value (routine after background
         # subtraction) doesn't silently drop the point instead of plotting it.
+        if zero_as_gap:
+            y = y.where(y > 0)
+            traces.append(go.Scatter(x=y.index, y=y, mode="lines+markers", marker=dict(size=3), name=label))
+            continue
         y = y.clip(lower=0.1)
         traces.append(go.Scatter(x=y.index, y=y, mode="lines", name=label))
 
@@ -1089,6 +1097,7 @@ def quicklook_plot_plotly(
     epd_particle="Electron",
     epd_round_label=True,
     epd_resample=None,
+    epd_zero_as_gap=False,
     fontsize=13,
     linewidth=2,
     height_per_panel=140,
@@ -1254,6 +1263,7 @@ def quicklook_plot_plotly(
                 date_range=d_range,
                 round_epd_label=epd_round_label,
                 resample=epd_resample,
+                zero_as_gap=epd_zero_as_gap,
             )
             start_idx = len(fig.data)
             for tr in epd_fig.data:
