@@ -100,6 +100,43 @@ def _filter_time_range(time_arr, date_range):
 # stix_plot_overlay in quicklooks.py)
 # ---------------------------------------------------------------------------
 
+_HIGHLIGHT_COLORS = ["orange", "cyan", "magenta", "yellow", "lime"]
+
+# Per-energy-band colors, lowest band first. Shared by the STIX lightcurve
+# traces and the STIX imaging contours so the same energy range has the same
+# color in both plots.
+_ENERGY_BAND_COLORS = ["red", "blue", "green", "orange", "cyan", "magenta"]
+
+
+def _add_interval_highlights(fig, highlight_intervals, data_time=None):
+    """Draws a fig.add_vrect per (start, end) interval, color-cycled and
+    labeled #0/#1/... so multiple intervals (e.g. Sequence mode's tiles)
+    stay individually recognizable rather than blending into one shaded
+    region. No-op if highlight_intervals is falsy - existing callers that
+    never pass it see identical output to before this was added.
+
+    data_time, if given, pins the x-axis range to the actual data's time
+    span regardless of how far a highlight extends. Without this, a
+    highlight interval that extends past the loaded file's (often very
+    short, ~seconds-to-minutes) time window - e.g. a mistyped time range,
+    or Sequence mode's last tile deliberately extending past the selected
+    end (see stix_imaging.tile_time_range) - makes Plotly auto-range the
+    x-axis to fit the highlight, squeezing the real data into an
+    invisible sliver at one edge: the plot LOOKS blank even though the
+    data is there. Confirmed this reproduces without this clamp."""
+    if not highlight_intervals:
+        return fig
+    for i, (start, end) in enumerate(highlight_intervals):
+        fig.add_vrect(
+            x0=start, x1=end,
+            fillcolor=_HIGHLIGHT_COLORS[i % len(_HIGHLIGHT_COLORS)],
+            opacity=0.25, line_width=1,
+            annotation_text=f"#{i}", annotation_position="top left",
+        )
+    if data_time is not None and len(data_time):
+        fig.update_xaxes(range=[np.min(data_time), np.max(data_time)])
+    return fig
+
 
 def stix_spectrogram_figure(
     counts,
@@ -109,10 +146,15 @@ def stix_spectrogram_figure(
     ylogscale=False,
     colorscale="Jet",
     height=420,
+    highlight_intervals=None,
 ):
     """Port of stix_plot_spectrogram. counts_per_sec (T, E) -> heatmap
     (E rows, T cols), log10 in Z computed manually (Plotly has no log
-    color-axis)."""
+    color-axis).
+
+    highlight_intervals: optional list of (start, end) time pairs, shaded
+    as vrects - used by the STIX Imaging panel to show the selected
+    imaging interval(s)/sequence tiles on top of the lightcurve context."""
     time = counts["time"]
     cts_per_sec = np.asarray(counts["counts_per_sec"])
     min_channels = cts_per_sec.shape[-1]
@@ -144,6 +186,7 @@ def stix_spectrogram_figure(
     if date_range:
         fig.update_xaxes(range=list(date_range))
     fig.update_layout(height=height, margin=dict(l=60, r=20, t=30, b=40))
+    _add_interval_highlights(fig, highlight_intervals, data_time=None if date_range else time)
     return fig
 
 
@@ -165,7 +208,7 @@ def stix_counts_traces(
     on a log Y-axis (log(0) is undefined), leaving gaps in the curve. Pass
     this only when the caller's Y-axis is actually log-scaled - on a linear
     axis, zero is a meaningful, correctly-rendered value."""
-    color_list = ["red", "dodgerblue", "limegreen", "cyan", "magenta"]
+    color_list = _ENERGY_BAND_COLORS
 
     time = np.asarray(counts["time"])
     cts_per_sec = np.asarray(counts["counts_per_sec"])
@@ -204,7 +247,15 @@ def stix_counts_traces(
 
     traces = []
     for g, (counts_plot, e_bounds) in enumerate(plot_groups):
-        label = f"{int(e_bounds[0])}-{int(e_bounds[1])} keV"
+        # STIX's topmost energy channel is open-ended (e_high == inf) - int()
+        # on that raises OverflowError, so label it "X+ keV" instead of a
+        # range. Only reachable via the ungrouped (integrate_bins=None)
+        # path, which is why this wasn't hit until a caller stopped always
+        # passing integrate_bins.
+        if np.isinf(e_bounds[1]):
+            label = f"{int(e_bounds[0])}+ keV"
+        else:
+            label = f"{int(e_bounds[0])}-{int(e_bounds[1])} keV"
         y_values = np.clip(counts_plot, 1.0, None) if floor_at_one else counts_plot
         traces.append(
             go.Scatter(
@@ -261,6 +312,7 @@ def stix_overlay_figure(
     linewidth=2,
     colorscale="Jet",
     height=460,
+    highlight_intervals=None,
 ):
     """Port of stix_plot_overlay: spectrogram heatmap + integrated count-rate
     curves on a secondary y-axis."""
@@ -298,6 +350,7 @@ def stix_overlay_figure(
     if date_range:
         fig.update_xaxes(range=list(date_range))
     fig.update_layout(height=height, margin=dict(l=60, r=60, t=30, b=40))
+    _add_interval_highlights(fig, highlight_intervals, data_time=None if date_range else counts["time"])
     return fig
 
 
@@ -340,6 +393,124 @@ def stix_bkg_figure(counts, height=380):
     if energies[-1] >= 81:
         fig.add_vline(x=81, line_dash="dash", line_color="red")
     fig.update_layout(height=height, margin=dict(l=60, r=20, t=30, b=40))
+    return fig
+
+
+_DEFAULT_CONTOUR_LEVELS = (0.5, 0.75, 0.9)
+
+_CONTOUR_COLORS = _ENERGY_BAND_COLORS
+
+
+def _stix_image_traces(results, mode="heatmap", legend=True, levels=_DEFAULT_CONTOUR_LEVELS):
+    """results: list of stix_imaging.reconstruct_stix_image's return dicts,
+    one per energy range, same time window/algorithm. mode="heatmap" only
+    makes sense for a single range (caller/UI must guarantee len==1 before
+    reaching here - not re-validated). mode="contour" draws one discrete
+    level trace per entry in `levels` (fractions of each result's own peak,
+    default 50/75/90%) per range, one color per range, one legend entry per
+    range (Plotly's start/end/size only supports evenly-spaced ladders, so
+    unevenly-spaced levels need one trace per level)."""
+    if mode == "heatmap":
+        result = results[0]
+        return [
+            go.Heatmap(
+                x=result["x_arcsec"], y=result["y_arcsec"], z=result["image"],
+                colorscale="Viridis", colorbar=dict(title="Reconstructed intensity"),
+            )
+        ]
+    levels = levels or _DEFAULT_CONTOUR_LEVELS
+    traces = []
+    for i, result in enumerate(results):
+        x, y, z = result["x_arcsec"], result["y_arcsec"], result["image"]
+        peak = np.nanmax(z)
+        e_lo, e_hi = result["energy_range"]
+        color = _CONTOUR_COLORS[i % len(_CONTOUR_COLORS)]
+        for j, frac in enumerate(levels):
+            traces.append(
+                go.Contour(
+                    x=x, y=y, z=z,
+                    contours=dict(start=frac * peak, end=frac * peak, size=1, coloring="lines"),
+                    line=dict(color=color, width=2),
+                    # Explicit solid colorscale, not just line.color - forces
+                    # every level of this range's contour to the SAME flat
+                    # color regardless of any shared default colorscale, so
+                    # different energy ranges are visually distinguishable by
+                    # color alone rather than by a shared gradient.
+                    colorscale=[[0, color], [1, color]],
+                    showscale=False,
+                    name=f"{e_lo:.0f}-{e_hi:.0f} keV",
+                    legendgroup=f"range{i}",
+                    showlegend=legend and j == 0,
+                )
+            )
+    return traces
+
+
+def stix_flare_location_figure(info, height=480):
+    """info: stix_imaging.flare_location_on_disk's return dict. Orange solar
+    limb as seen from Solar Orbiter, red X at the flare position."""
+    fig = go.Figure(
+        [
+            go.Scatter(
+                x=info["limb_x"], y=info["limb_y"], mode="lines",
+                line=dict(color="orange", width=3), name="Solar limb (from Solar Orbiter)",
+            ),
+            go.Scatter(
+                x=[info["flare_x"]], y=[info["flare_y"]], mode="markers",
+                marker=dict(symbol="x", color="red", size=14, line=dict(width=3)),
+                name=f"Flare ({info['flare_x']:.0f}\", {info['flare_y']:.0f}\")",
+            ),
+        ]
+    )
+    fig.update_xaxes(title="Helioprojective Tx [arcsec]", scaleanchor="y", scaleratio=1)
+    fig.update_yaxes(title="Helioprojective Ty [arcsec]")
+    fig.update_layout(
+        title=f"Flare location — Solar Orbiter at {info['distance_au']:.3f} AU, {info['obstime'].iso[:19]}",
+        height=height, margin=dict(l=60, r=20, t=50, b=40),
+    )
+    return fig
+
+
+def stix_imaging_figure(results, mode="heatmap", height=500, levels=_DEFAULT_CONTOUR_LEVELS):
+    """results: list of stix_imaging.reconstruct_stix_image's return dicts
+    (one per energy range, same time window/algorithm). mode="heatmap" is
+    the default meshgrid view, only valid for a single range; "contour"
+    draws each range as discrete-level contour lines instead (see `levels`),
+    one color per range. Axes are in the native STIXImaging frame
+    (boresight-relative arcsec, not rotated to solar north - see
+    stix_imaging.py)."""
+    fig = go.Figure(_stix_image_traces(results, mode, levels=levels))
+    fig.update_xaxes(title="STIX Tx [arcsec]", scaleanchor="y", scaleratio=1)
+    fig.update_yaxes(title="STIX Ty [arcsec]")
+    algorithm = results[0]["algorithm"]
+    ranges = ", ".join(f"{lo:.0f}-{hi:.0f}" for lo, hi in (r["energy_range"] for r in results))
+    fig.update_layout(
+        title=f"{algorithm} — {ranges} keV",
+        height=height,
+        margin=dict(l=60, r=20, t=40, b=40),
+    )
+    return fig
+
+
+def stix_imaging_mosaic_figure(results_per_tile, mode="contour", cols=3, height_per_row=300, levels=_DEFAULT_CONTOUR_LEVELS):
+    """results_per_tile: list[list[dict]], one inner list per Sequence-mode
+    tile (same shape each result dict as stix_imaging_figure's). Lays every
+    tile out as a `cols`-wide grid of subplots; only the first tile's traces
+    keep their legend entries so the legend doesn't repeat per cell."""
+    import math
+
+    n = len(results_per_tile)
+    rows = math.ceil(n / cols)
+    titles = []
+    for tile_results in results_per_tile:
+        t0, t1 = tile_results[0]["time_range"]
+        titles.append(f"{str(t0)[-8:]}–{str(t1)[-8:]}")
+    fig = make_subplots(rows=rows, cols=cols, subplot_titles=titles)
+    for i, tile_results in enumerate(results_per_tile):
+        row, col = i // cols + 1, i % cols + 1
+        for trace in _stix_image_traces(tile_results, mode, legend=(i == 0), levels=levels):
+            fig.add_trace(trace, row=row, col=col)
+    fig.update_layout(height=height_per_row * rows, margin=dict(l=40, r=20, t=40, b=40))
     return fig
 
 

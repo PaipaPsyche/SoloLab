@@ -67,33 +67,21 @@ def decode_upload(contents):
     return base64.b64decode(content_string)
 
 
-def bytes_to_tempfile(data, filename):
+@contextlib.contextmanager
+def tempfile_from_bytes(data, filename):
     """Write bytes to a temp file preserving the ORIGINAL filename (not just
     its extension): stix_read.stix_create_counts and rpw_read.rpw_get_data
     both parse metadata (level, instrument, spectrogram-vs-imaging) out of
     os.path.basename(pathfile), e.g. "solo_L1_stix-sci-xray-spec_...fits" or
     "solo_L2_rpw-hfr-surv_...cdf" - a randomized tempfile.mkstemp() name
     would break that parsing, so each upload gets its own temp directory
-    instead and keeps its real basename."""
+    instead and keeps its real basename. The directory is removed on exit
+    (success or exception) so a long-running server doesn't leak one temp
+    dir per Preview/Load click."""
     tmp_dir = tempfile.mkdtemp()
     path = os.path.join(tmp_dir, filename or "upload.dat")
     with open(path, "wb") as f:
         f.write(data)
-    return path
-
-
-def upload_to_tempfile(contents, filename):
-    return bytes_to_tempfile(decode_upload(contents), filename)
-
-
-@contextlib.contextmanager
-def tempfile_from_bytes(data, filename):
-    """Same as bytes_to_tempfile, but as a context manager that removes the
-    temp directory on exit (success or exception). bytes_to_tempfile on its
-    own leaked one temp dir per Preview/Preview-w-Bkg/Load click with no
-    cleanup anywhere in the app - unbounded disk growth on a long-running
-    server (Backend Fixes item: Dash disk leak)."""
-    path = bytes_to_tempfile(data, filename)
     try:
         yield path
     finally:

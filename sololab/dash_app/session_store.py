@@ -38,15 +38,8 @@ class SessionStore:
     def has(self, session_id, name):
         return self._key(session_id, name) in self._cache
 
-    def touch(self, session_id, name):
-        self._cache.touch(self._key(session_id, name), expire=self.ttl)
-
     def delete(self, session_id, name):
         self._cache.delete(self._key(session_id, name))
-
-    def clear_session(self, session_id, names):
-        for name in names:
-            self.delete(session_id, name)
 
     def evict_stale(self):
         """Force a full sweep of expired entries. diskcache normally expires

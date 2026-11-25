@@ -8,6 +8,7 @@ editable-list modals (STIX energy-integration bins, RPW frequencies shared
 between HFR/TNR, EPD channels) reuse utils.make_list_editor_modal.
 """
 import logging
+from datetime import datetime
 
 import dash
 import dash_bootstrap_components as dbc
@@ -53,7 +54,7 @@ def layout(**kwargs):
                         ],
                         md=4,
                     ),
-                    dbc.Col(dcc.Graph(id="plotprefs-graph"), md=8),
+                    dbc.Col(dbc.Spinner(dcc.Graph(id="plotprefs-graph"), color="secondary"), md=8),
                 ]
             ),
             _stix_energy_ranges_modal(),
@@ -246,6 +247,14 @@ register_list_editor_add_row_callback("rpw-frequencies", {"freq": 500})
 
 # --- visibility toggling ---------------------------------------------------------------
 
+_SPEC, _CURVE, _OVERLAY = {"spectrogram"}, {"time profiles"}, {"overlay"}
+_SPEC_OVERLAY, _CURVE_OVERLAY = _SPEC | _OVERLAY, _CURVE | _OVERLAY
+
+
+def _visibility(plot_type, *shown_for):
+    """One style dict per control row: shown when plot_type is in that row's set."""
+    return tuple({"display": "block" if plot_type in s else "none"} for s in shown_for)
+
 
 @callback(
     Output("stix-logy-energy-row", "style"),
@@ -258,17 +267,7 @@ register_list_editor_add_row_callback("rpw-frequencies", {"freq": 500})
     Input("stix-plot-type", "value"),
 )
 def toggle_stix_controls(plot_type):
-    show, hide = {"display": "block"}, {"display": "none"}
-    spec, curve, overlay = plot_type == "spectrogram", plot_type == "time profiles", plot_type == "overlay"
-    return (
-        show if spec else hide,
-        show if curve else hide,
-        show if overlay else hide,
-        show if (spec or overlay) else hide,
-        show if (curve or overlay) else hide,
-        show if (spec or overlay) else hide,
-        show if (curve or overlay) else hide,
-    )
+    return _visibility(plot_type, _SPEC, _CURVE, _OVERLAY, _SPEC_OVERLAY, _CURVE_OVERLAY, _SPEC_OVERLAY, _CURVE_OVERLAY)
 
 
 @callback(
@@ -282,54 +281,30 @@ def toggle_stix_controls(plot_type):
     Input("rpw-plot-type", "value"),
 )
 def toggle_rpw_controls(plot_type):
-    show, hide = {"display": "block"}, {"display": "none"}
-    spec, curve, overlay = plot_type == "spectrogram", plot_type == "time profiles", plot_type == "overlay"
-    return (
-        show if spec else hide,
-        show if curve else hide,
-        show if overlay else hide,
-        show if (spec or overlay) else hide,
-        show if (spec or overlay) else hide,
-        show if (curve or overlay) else hide,
-        show if (curve or overlay) else hide,
-    )
-
-
-@callback(Output("epd-select-channels-btn", "disabled"), Input("instrument-status-store", "data"))
-def toggle_epd_channels_btn(status):
-    status = status or {}
-    return not status.get("epd", {}).get("loaded")
+    return _visibility(plot_type, _SPEC, _CURVE, _OVERLAY, _SPEC_OVERLAY, _SPEC_OVERLAY, _CURVE_OVERLAY, _CURVE_OVERLAY)
 
 
 @callback(
+    Output("epd-select-channels-btn", "disabled"),
     Output("stix-prefs-bkg-btn", "disabled"),
-    Input("instrument-status-store", "data"),
-)
-def toggle_stix_bkg_btn(status):
-    status = status or {}
-    return not status.get("stix", {}).get("bkg_enabled")
-
-
-@callback(
     Output("epd-prefs-bkg-btn", "disabled"),
-    Input("instrument-status-store", "data"),
-)
-def toggle_epd_bkg_btn(status):
-    status = status or {}
-    return not status.get("epd", {}).get("bkg_enabled")
-
-
-@callback(
     Output("rpw-prefs-bkg-hfr-btn", "disabled"),
     Output("rpw-prefs-bkg-tnr-btn", "disabled"),
     Output("rpw-prefs-bkg-combined-btn", "disabled"),
     Input("instrument-status-store", "data"),
 )
-def toggle_rpw_bkg_btns(status):
+def toggle_prefs_buttons(status):
     status = status or {}
     hfr_bkg = status.get("rpw_hfr", {}).get("bkg_enabled")
     tnr_bkg = status.get("rpw_tnr", {}).get("bkg_enabled")
-    return not hfr_bkg, not tnr_bkg, not (hfr_bkg and tnr_bkg)
+    return (
+        not status.get("epd", {}).get("loaded"),
+        not status.get("stix", {}).get("bkg_enabled"),
+        not status.get("epd", {}).get("bkg_enabled"),
+        not hfr_bkg,
+        not tnr_bkg,
+        not (hfr_bkg and tnr_bkg),
+    )
 
 
 # --- live sync to plot-prefs-store ----------------------------------------------------
@@ -609,22 +584,6 @@ def stix_prefs_bkg_preview(n_clicks, sid):
     return plotting.stix_bkg_figure(counts), "", "success", False
 
 
-def _rpw_prefs_preview(data_type, prefs):
-    p = (prefs or {}).get("rpw", {})
-    plot_type = p.get("type", "spectrogram")
-    freq_range = [p["freq_min"], p["freq_max"]] if p.get("freq_range_enabled") else None
-    default_freqs = RPW_HFR_PREVIEW_FREQS if data_type == "hfr" else RPW_TNR_PREVIEW_FREQS
-    freqs = p.get("selected_frequencies") or default_freqs
-
-    def _load(sid):
-        psd = session_store.get(sid, rpw_key(data_type, "psd_final"))
-        if psd is None:
-            raise ValueError(f"No RPW-{data_type.upper()} data loaded. Import it first.")
-        return psd
-
-    return plot_type, freq_range, freqs, _load
-
-
 @callback(
     Output("plotprefs-graph", "figure", allow_duplicate=True),
     Output("plotprefs-alert", "children", allow_duplicate=True),
@@ -644,9 +603,13 @@ def rpw_prefs_preview(n_hfr, n_tnr, prefs, sid):
         raise PreventUpdate
     data_type = "hfr" if triggered == "rpw-prefs-preview-hfr-btn" else "tnr"
     try:
-        plot_type, freq_range, freqs, load = _rpw_prefs_preview(data_type, prefs)
-        psd = load(sid)
         p = (prefs or {}).get("rpw", {})
+        plot_type = p.get("type", "spectrogram")
+        freq_range = [p["freq_min"], p["freq_max"]] if p.get("freq_range_enabled") else None
+        freqs = p.get("selected_frequencies") or (RPW_HFR_PREVIEW_FREQS if data_type == "hfr" else RPW_TNR_PREVIEW_FREQS)
+        psd = session_store.get(sid, rpw_key(data_type, "psd_final"))
+        if psd is None:
+            raise ValueError(f"No RPW-{data_type.upper()} data loaded. Import it first.")
         if plot_type == "spectrogram":
             fig = plotting.rpw_psd_figure(psd, frequency_range=freq_range)
         elif plot_type == "time profiles":
@@ -713,9 +676,7 @@ def epd_prefs_preview(n_clicks, prefs, sid):
         energies = session_store.get(sid, "epd_energies")
         channels = (prefs or {}).get("epd", {}).get("selected_channels") or [2, 6, 14, 18, 26]
 
-        from datetime import datetime as _dt
-
-        day = _dt.strptime(meta["date"], "%Y-%m-%d")
+        day = datetime.strptime(meta["date"], "%Y-%m-%d")
         date_range = (day.replace(hour=0, minute=0, second=0), day.replace(hour=23, minute=59, second=59))
         plot_type = (prefs or {}).get("epd", {}).get("type", "time profiles")
         if plot_type == "spectrogram":

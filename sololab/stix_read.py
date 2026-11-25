@@ -19,15 +19,38 @@ import astropy.units as u
 # already have), so the rest of sololab keeps working without it installed.
 # `pip install stixdcpy` to use these.
 
-# Only these two product types map to a FITS shape stix_create_counts can
-# actually parse (spectrogram vs. summed-over-pixels L1 data, matching its
-# own `spectrogram_file = "spe" in basename(pathfile)` detection). Other
-# STIX Data Center product types (housekeeping, quicklook, ...) have a
-# different FITS structure and would fail if fed into stix_create_counts.
+# Only these product types map to a FITS shape stix_create_counts can
+# actually parse (spectrogram vs. summed-over-pixels pixel data, matching
+# is_stix_pixel_file's filename-substring detection below). Other STIX Data
+# Center product types (housekeeping, quicklook, ...) have a different FITS
+# structure and would fail if fed into stix_create_counts.
+#
+# "xray-cpd" is the STIX Data Center's real product_type string for pixel
+# data - confirmed 2026-09-21 by querying the live API directly. The
+# previous value here, "xray-l1", is not a real product_type the Data
+# Center recognizes at all (confirmed: it returns zero results for any date
+# range, silently - the server doesn't error on an unrecognized
+# product_type, it just returns nothing, which is why searches for pixel
+# data always came back empty). The Data Center's actual pixel-data
+# product-type vocabulary is xray-rpd (Raw Pixel Data, uncompressed) /
+# xray-cpd (Compressed Pixel Data) / xray-scpd (Summed Compressed Pixel
+# Data) / xray-vis (Visibilities) - xray-cpd is offered here as it's the
+# one stix_create_counts's HDU[2] "counts" parsing has actually been
+# verified against (see sololab.stix_imaging's module docstring for the
+# same product used there).
 STIX_DOWNLOADABLE_PRODUCT_TYPES = {
     "xray-spec": "Spectrogram",
-    "xray-l1": "L1 pixel data",
+    "xray-cpd": "Compressed pixel data",
 }
+
+
+def is_stix_pixel_file(pathfile):
+    """True for L1 pixel-data files (detector/pixel-resolved), False for
+    already-summed spectrogram files - same filename-substring check
+    stix_create_counts uses internally, extracted here so callers that need
+    to know the file type *before* reading it (e.g. to gate a UI feature)
+    don't duplicate the heuristic."""
+    return "spe" not in os.path.basename(pathfile)
 
 
 def stix_query_science_files(start, end, product_type="xray-spec", level="L1"):
@@ -92,7 +115,7 @@ def stix_create_counts(pathfile, is_bkg=False,time_arr=None,date_range=None,corr
 
 
     print("  File: ",os.path.basename(pathfile))
-    if("spe" in os.path.basename(pathfile)):
+    if(not is_stix_pixel_file(pathfile)):
         spectrogram_file=True
         print("  Type: ",infos[2],"spectrogram","BKG" if is_bkg else "")
     else:

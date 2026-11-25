@@ -121,13 +121,16 @@ layout = dbc.Container(
                                     className="mb-2",
                                 ),
                                 dbc.Button(
-                                    "Search", id="stix-search-btn", color="secondary", outline=True,
-                                    className="w-100 mb-2",
+                                    "\U0001F50D", id="stix-search-btn", color="secondary", outline=True,
+                                    title="Search", style={"width": "44px"}, className="mb-2",
                                 ),
-                                dcc.Dropdown(
-                                    id="stix-search-results",
-                                    placeholder="Search results will appear here",
-                                    className="mb-2",
+                                dbc.Spinner(
+                                    dcc.Dropdown(
+                                        id="stix-search-results",
+                                        placeholder="Search results will appear here",
+                                        className="mb-2",
+                                    ),
+                                    color="secondary",
                                 ),
                                 dbc.Button(
                                     "Download Selected", id="stix-download-btn", disabled=True,
@@ -235,13 +238,13 @@ layout = dbc.Container(
                     ),
                     md=4,
                 ),
-                dbc.Col(dcc.Graph(id="stix-preview-graph"), md=8),
+                dbc.Col(dbc.Spinner(dcc.Graph(id="stix-preview-graph"), color="secondary"), md=8),
             ]
         ),
         dbc.Modal(
             [
                 dbc.ModalHeader(dbc.ModalTitle("STIX Background")),
-                dbc.ModalBody(dcc.Graph(id="stix-bkg-graph")),
+                dbc.ModalBody(dbc.Spinner(dcc.Graph(id="stix-bkg-graph"), color="secondary")),
             ],
             id="stix-bkg-modal",
             is_open=False,
@@ -307,7 +310,7 @@ def stix_search(n_clicks, date_str, time_str, duration_label, product_type):
     if not results:
         return [], None, "No files found for this date range/product type.", "warning", True
 
-    type_label = "PIXEL" if product_type == "xray-l1" else "SPEC"
+    type_label = "PIXEL" if product_type == "xray-cpd" else "SPEC"
     options = []
     for r in results:
         t0 = datetime.fromisoformat(r.get("observation_time_range", ["?", "?"])[0])
@@ -513,12 +516,14 @@ def stix_load(n_clicks, bkg_file_enabled, bkg_time_enabled, bkg_start, bkg_end, 
                 "bkg_poll_function": poll,
             },
         )
+        filename, _ = session_store.get(sid, "stix_file_bytes")
         status = dict(status or {})
         status["stix"] = {
             "loaded": True,
             "min_time": format_dt_input(min(counts["time"])),
             "max_time": format_dt_input(max(counts["time"])),
             "bkg_enabled": bool(bkg_file_enabled) or bool(bkg_time_enabled),
+            "pixel_data": stix_read.is_stix_pixel_file(filename),
         }
         return status, "STIX data loaded.", "success", True
     except Exception as exc:  # noqa: BLE001

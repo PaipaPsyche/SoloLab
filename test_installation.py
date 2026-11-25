@@ -53,6 +53,16 @@ OPTIONAL_PACKAGES = [
     # else works fine without it.
     ("stixdcpy", "stixdcpy"),
 ]
+STIX_IMAGING_PACKAGES = [
+    # Only needed for Plot Preferences' STIX "imaging" plot type
+    # (sololab.stix_imaging.reconstruct_stix_image) - everything else works fine
+    # without it. NOTE: even when both import cleanly, reconstruction currently
+    # fails at runtime due to a confirmed upstream bug in stixpy 0.3.0 - see
+    # sololab/stix_imaging.py's module docstring. This check only confirms the
+    # packages are importable, not that imaging actually works.
+    ("stixpy", "stixpy"),
+    ("xrayvision", "xrayvisim"),
+]
 
 GROUPS = [
     ("Core (both apps)", CORE_PACKAGES, True),
@@ -60,6 +70,7 @@ GROUPS = [
     ("Web app only (Dash)", WEB_PACKAGES, False),
     ("Deployment only (gunicorn)", DEPLOY_PACKAGES, False),
     ("Optional features (STIX Data Center download)", OPTIONAL_PACKAGES, False),
+    ("Optional features (STIX imaging)", STIX_IMAGING_PACKAGES, False),
 ]
 
 
