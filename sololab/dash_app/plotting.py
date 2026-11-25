@@ -826,7 +826,9 @@ def epd_flux_figure(
         # so a true zero/negative value (routine after background
         # subtraction) doesn't silently drop the point instead of plotting it.
         if zero_as_gap:
-            y = y.where(y > 0)
+            # "> 0" alone keeps float32 leftovers of a bkg subtraction (~1e-6),
+            # which stretch the log axis down to 1u; treat < 1e-6 x channel max as 0
+            y = y.where(y > 1e-6 * y.abs().max())
             traces.append(go.Scatter(x=y.index, y=y, mode="lines+markers", marker=dict(size=3), name=label))
             continue
         y = y.clip(lower=0.1)

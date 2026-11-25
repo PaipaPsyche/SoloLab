@@ -323,9 +323,11 @@ def auto_bkg(times, values, window=AUTO_BKG_WINDOW):
     """values: (time, channel). Moving median of every channel over `window`;
     the ONE window whose vector of channel medians has the smallest L2 norm
     is the background for all channels (plus each channel's std in it).
-    Only full windows count, so a lone early sample can't win.
-    ponytail: plain norm, so the brightest channels dominate the choice;
-    normalise channels first if that picks noisy windows."""
+    Each channel is first expressed relative to its own quietest level,
+    (median - min) / min, so bright channels don't decide alone: with a
+    plain norm, STIX 4-6 keV picked a window where 6-10 keV was still 21
+    cts/s above its quiet level and the curves' zeros didn't line up.
+    Only full windows count, so a lone early sample can't win."""
     df = pd.DataFrame(np.asarray(values, dtype=float), index=pd.DatetimeIndex(pd.to_datetime(np.asarray(times)))).sort_index()
     full = df.index >= df.index[0] + pd.Timedelta(window)
     if not full.any():  # window shorter than 5 min - fall back to the whole window
@@ -333,7 +335,11 @@ def auto_bkg(times, values, window=AUTO_BKG_WINDOW):
     roll = df.rolling(window)
     med = roll.median().to_numpy()[full]
     std = roll.std().to_numpy()[full]
-    norm = np.sqrt(np.nansum(med**2, axis=1))
+    lo = np.nanmin(np.where(np.isnan(med), np.inf, med), axis=0)
+    typical = np.nanmedian(np.where(med > 0, med, np.nan), axis=0)
+    scale = np.where(lo > 0, lo, np.where(typical > 0, typical, 1.0))  # channels that touch 0
+    with np.errstate(invalid="ignore"):
+        norm = np.sqrt(np.nansum(((med - lo) / scale) ** 2, axis=1))
     norm[np.all(np.isnan(med), axis=1)] = np.inf
     i = int(np.argmin(norm))
     return np.nan_to_num(med[i]), np.nan_to_num(std[i])
@@ -352,7 +358,9 @@ def _apply_auto_bkg(code, d, start, end, particle, resample=None):
         m = _in_window(d["time"], start, end)
         bkg, std = auto_bkg(np.asarray(d["time"])[m], cps[m])
         payload = {"mean_energy": d["mean_energy"], "background": bkg, "background_std": std}
-        return {**d, "counts_per_sec": np.clip(cps - bkg, 0, None)}, payload
+        # no per-channel clip: clipping before the energy bands are summed biases
+        # wide bands upward; the plot floors the summed curve at 1 instead
+        return {**d, "counts_per_sec": cps - bkg}, payload
     if code in ("hfr", "tnr"):
         v = np.asarray(d["v"], dtype=float)
         m = _in_window(d["time"], start, end)
@@ -559,9 +567,11 @@ if __name__ == "__main__":
     a = {"time": np.array(["2024-01-01T00:00", "2024-01-01T00:01"], dtype="datetime64[us]"), "frequency": np.array([2.0, 1.0]), "v": np.array([[1, 2], [3, 4]])}
     b = {"time": np.array(["2024-01-01T00:01", "2024-01-01T00:02"], dtype="datetime64[us]"), "frequency": np.array([1.0, 2.0, 3.0]), "v": np.array([[5, 6], [7, 8], [0, 0]])}
     tt = pd.date_range("2024-01-01", periods=20, freq="1min")
-    vals = np.column_stack([np.r_[np.full(10, 5.0), np.full(10, 1.0)], np.r_[np.full(10, 2.0), np.full(10, 9.0)]])
+    vals = np.column_stack([np.r_[np.full(10, 100.0), np.full(10, 120.0)], np.r_[np.full(10, 50.0), np.full(10, 2.0)]])
     bk, _ = auto_bkg(tt, vals)
-    assert bk.tolist() == [5.0, 2.0], bk  # one shared window: (5, 2) has a smaller norm than (1, 9)
+    # one shared window, chosen relative to each channel's quiet level: (120, 2) is
+    # 20% above A's quietest and B at its quietest; a plain norm would pick (100, 50)
+    assert bk.tolist() == [120.0, 2.0], bk
     rs = [{"observation_time_range": ["a", "b"], "url": "x_V02_1.fits"}, {"observation_time_range": ["a", "b"], "url": "x_V04_2.fits"}, {"observation_time_range": ["c", "d"], "url": "y_V01_3.fits"}]
     assert [r["url"] for r in latest_versions(rs)] == ["x_V04_2.fits", "y_V01_3.fits"]
     j = join_psds([a, b])
