@@ -44,7 +44,8 @@ STIX_RANGES_DEFAULT = ["6-10", "12-25"]
 TNR_MIN_KHZ = 50
 EPD_RESAMPLE_DEFAULT = "5min"  # 1min is spiky for quiet-day EPT counts
 MAX_WINDOW_MIN = 7 * 24 * 60
-AUTO_BKG_WINDOW = "5min"  # STIX
+AUTO_BKG_WINDOW = "5min"  # default / EPD minimum
+STIX_BKG_WINDOW = "1min"  # STIX is fast (0.5-20 s bins): short quiet gaps are enough
 RPW_BKG_WINDOW = "15min"  # wider: RPW bursts/drifts outlast 5 min, which biased the bkg high
 EPD_BKG_MIN_POINTS = 5  # EPD window = max(5 min, 5 resampled points)
 
@@ -106,7 +107,7 @@ def _controls():
                 html.Div(
                     "Moving median over every channel; the window whose channel medians have the smallest "
                     "norm is the background for all channels "
-                    "(window: STIX 5 min, RPW 15 min, EPD max(5 min, 5 resampled points)).",
+                    "(window: STIX 1 min, RPW 15 min, EPD max(5 min, 5 resampled points)).",
                     className="small text-muted",
                 ),
                 html.Div(
@@ -356,7 +357,7 @@ def _apply_auto_bkg(code, d, start, end, particle, resample=None):
     if code == "stix":
         cps = np.asarray(d["counts_per_sec"], dtype=float)
         m = _in_window(d["time"], start, end)
-        bkg, std = auto_bkg(np.asarray(d["time"])[m], cps[m])
+        bkg, std = auto_bkg(np.asarray(d["time"])[m], cps[m], STIX_BKG_WINDOW)
         payload = {"mean_energy": d["mean_energy"], "background": bkg, "background_std": std}
         # no per-channel clip: clipping before the energy bands are summed biases
         # wide bands upward; the plot floors the summed curve at 1 instead
