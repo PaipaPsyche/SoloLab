@@ -30,6 +30,10 @@ GUI — see [`sololab_examples.ipynb`](sololab_examples.ipynb).
   over a chosen time interval, per energy channel (web app only, currently).
 - **Visualization** — spectrograms and per-channel time profiles for any instrument, combined into
   one multi-panel plot with a shared time axis.
+- **Auto Plot** (web app) — pick a start time, a window in minutes and the instruments; SoloLab
+  downloads whatever covers the window (joining multiple files/days), and plots STIX light curves,
+  RPW-HFR/TNR spectrograms and EPD flux stacked on one time axis. Optional auto-background: a
+  moving median over every channel, using the window whose channel medians have the smallest norm.
 - **Estimations and fits** — Frequency Drift Rate Analysis (radio burst exciter velocity) and
   electron abundance vs. threshold energy from STIX powerlaws (`sololab.freqs_drift`,
   `sololab.electron_powerlaw`; still uder revision;  called directly, not yet wired into either GUI).

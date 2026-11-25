@@ -53,6 +53,13 @@ def layout(**kwargs):
     return dbc.Container(
         [
             html.H3("Auto Plot", className="mt-3"),
+            html.P(
+                "Pick a start date/time, a window length and the instruments, then press AUTO PLOT: "
+                "the data covering the whole window is downloaded (joining files or days when needed) "
+                "and plotted as one stacked figure. Advanced settings hold the panel order, "
+                "per-instrument options and automatic background subtraction.",
+                className="text-muted",
+            ),
             dbc.Alert(id="ap-alert", is_open=False, dismissable=True, className="mt-2"),
             dbc.Row(
                 [

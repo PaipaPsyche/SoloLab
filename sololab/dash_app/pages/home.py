@@ -100,6 +100,15 @@ layout = dbc.Container(
                 ),
                 html.Li(
                     [
+                        html.B("Auto Plot"),
+                        " - the one-click shortcut: choose a start time, a window length and the "
+                        "instruments, and the app downloads everything covering that window (joining "
+                        "files/days as needed) and draws the stacked plot. Optional automatic background "
+                        "subtraction, with plots of the background it used.",
+                    ]
+                ),
+                html.Li(
+                    [
                         html.B("Data Pack"),
                         " - save everything currently loaded in a session to a file, and reload it "
                         "later without re-downloading or re-importing.",

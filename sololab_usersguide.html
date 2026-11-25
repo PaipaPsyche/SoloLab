@@ -223,7 +223,19 @@ and press <code>Ctrl+C</code>.
   <strong>The sidebar</strong> on the left is how you get everywhere: <b>Import Data</b> to load
   an instrument's data, <b>Data Pack</b> to save/reload a session, and under <b>Plot</b>,
   <b>Plot Data</b> (one instrument at a time) or <b>Combined Plot</b> (several instruments
-  stacked together).
+  stacked together). The orange <b>Auto Plot</b> button is the quick route described next.
+</div>
+
+<div class="step">
+  <strong>Shortcut - Auto Plot.</strong> If you just want to see an event, click <b>Auto Plot</b>.
+  Pick a start date, a start time (HH:MM:SS) and how many minutes to show, tick the instruments,
+  and click <b>AUTO PLOT</b>. SoloLab downloads everything it needs for that window by itself -
+  even if the window crosses midnight or spans several files - and draws all instruments stacked
+  on one time axis. The first run of a window can take a minute; repeats are faster because
+  downloads are kept. Open <b>Advanced settings</b> to change the panel order, the STIX energy
+  ranges, RPW and EPD options, or tick <b>Auto-bkg</b> to subtract a background automatically
+  (an <b>Auto-bkg plots</b> link then lets you look at the background that was removed). The data
+  it downloads also counts as loaded, so Plot Data and Combined Plot can use it afterwards.
 </div>
 
 <div class="step">
