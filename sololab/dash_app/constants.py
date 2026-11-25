@@ -23,7 +23,9 @@ EPD_POLL_DEFAULT = "mean"
 
 EPD_RESAMPLE_OPTIONS = ["30sec", "1min", "2min", "5min", "10min"]
 EPD_RESAMPLE_DEFAULT = "1min"
-EPD_PARTICLE_OPTIONS = ["Electron", "Proton"]
+# Values are solo_epd_loader's key prefixes ("Ion_Flux", "Ion_Bins_Text"...) -
+# EPT has no "Proton_*" keys, so "Proton" as a value broke every EPD proton plot.
+EPD_PARTICLE_OPTIONS = [{"label": "Electron", "value": "Electron"}, {"label": "Proton", "value": "Ion"}]
 
 PLOT_TYPE_OPTIONS = ["spectrogram", "time profiles", "overlay"]
 RPW_OVERLAP_OPTIONS = ["Only TNR", "Only HFR", "Both"]

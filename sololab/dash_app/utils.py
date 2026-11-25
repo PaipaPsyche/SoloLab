@@ -171,3 +171,32 @@ def register_list_editor_add_row_callback(id_prefix, empty_row):
             raise PreventUpdate
         rows = rows or []
         return rows + [dict(empty_row)]
+
+
+# Panel-order rows (Combined Plot + Auto Plot) --------------------------------------
+
+
+def order_rows(display, labels, id_type):
+    """One row per instrument code in `display`, with up/down buttons
+    (pattern-matching ids {"type": id_type, "code", "dir"}) to move it in the
+    panel stack. Top of this list = top panel of the figure."""
+    rows = []
+    for i, code in enumerate(display):
+        rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(labels[code], width=6),
+                    dbc.Col(
+                        dbc.ButtonGroup(
+                            [
+                                dbc.Button("^", id={"type": id_type, "code": code, "dir": "up"}, size="sm", outline=True, color="secondary", disabled=i == 0),
+                                dbc.Button("v", id={"type": id_type, "code": code, "dir": "down"}, size="sm", outline=True, color="secondary", disabled=i == len(display) - 1),
+                            ]
+                        ),
+                        width=6,
+                    ),
+                ],
+                className="mb-1 align-items-center",
+            )
+        )
+    return rows

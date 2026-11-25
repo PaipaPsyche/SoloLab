@@ -134,3 +134,22 @@ a:not(.btn):hover {
     background-color: var(--sololab-accent) !important;
     border-color: var(--sololab-accent) !important;
 }
+
+/* --- Auto Plot call-to-action: deep orange + yellow text (WCAG AA contrast).
+   .btn.btn-autoplot + !important to beat the .btn-primary accent above. --- */
+.btn.btn-autoplot,
+.btn.btn-autoplot:focus,
+.btn.btn-autoplot:disabled {
+    background-color: #c2410c !important;
+    border-color: #c2410c !important;
+    color: #fde047 !important;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+.btn.btn-autoplot:hover,
+.btn.btn-autoplot:active {
+    background-color: #9a3412 !important;
+    border-color: #9a3412 !important;
+    color: #fef08a !important;
+}

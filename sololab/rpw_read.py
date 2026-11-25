@@ -394,16 +394,13 @@ def rpw_read_L3_data(filepath, min_channels=0):
     time = np.array(cdflib.cdfepoch.to_datetime(epoch) )
     flux= cdf_file.varget('PSD_FLUX')
 
-    # Drop timesteps with fewer than min_channels real (measured) channels.
-    # INTERPOL_FLAG encoding differs by file version: v01 0 = real,
-    # 1 = interpolated; v02 0 = no data, 1 = real, 2 = interpolated,
-    # 3 = real but below background.
+    # Drop timesteps with fewer than min_channels valid (not NaN, not CDF
+    # fill value) channels: the high-cadence sweeps that cause vertical stripes.
     if min_channels > 0:
-        flag = cdf_file.varget('INTERPOL_FLAG')
-        notes = str(cdf_file.varattsget('INTERPOL_FLAG').get('VAR_NOTES', ''))
-        real = np.isin(flag, (1, 3)) if '1 = real' in notes else flag == 0
-        keep = real.sum(axis=1) >= min_channels
-        print("  Dropped {} timesteps with < {} real channels.".format((~keep).sum(), min_channels))
+        fill = cdf_file.varattsget('PSD_SFU').get('FILLVAL')
+        valid = ~np.isnan(psd_sfu_vals) & (psd_sfu_vals != fill)
+        keep = valid.sum(axis=1) >= min_channels
+        print("  Dropped {} timesteps with < {} valid channels.".format((~keep).sum(), min_channels))
         time, psd_sfu_vals, flux = time[keep], psd_sfu_vals[keep], flux[keep]
 
     data = {

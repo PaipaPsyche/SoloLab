@@ -22,7 +22,7 @@ from dash.exceptions import PreventUpdate
 from sololab.dash_app import plotting
 from sololab.dash_app.constants import DEFAULT_PLOT_PREFS, INSTRUMENT_ORDER, rpw_key
 from sololab.dash_app.session_store import session_store
-from sololab.dash_app.utils import format_dt_input, parse_dt_input
+from sololab.dash_app.utils import format_dt_input, order_rows, parse_dt_input
 
 logger = logging.getLogger(__name__)
 
@@ -30,31 +30,6 @@ dash.register_page(__name__, path="/combined-plot", name="Combined Plot")
 
 INSTRUMENT_LABELS = {"stix": "STIX", "hfr": "RPW-HFR", "tnr": "RPW-TNR", "epd": "EPD"}
 STATUS_KEYS = {"stix": "stix", "hfr": "rpw_hfr", "tnr": "rpw_tnr", "epd": "epd"}
-
-
-def _order_rows(display):
-    """One row per currently-selected instrument, with up/down buttons to
-    move it in the panel stack. Top of this list = top panel of the figure."""
-    rows = []
-    for i, code in enumerate(display):
-        rows.append(
-            dbc.Row(
-                [
-                    dbc.Col(INSTRUMENT_LABELS[code], width=6),
-                    dbc.Col(
-                        dbc.ButtonGroup(
-                            [
-                                dbc.Button("^", id={"type": "cp-order-move", "code": code, "dir": "up"}, size="sm", outline=True, color="secondary", disabled=i == 0),
-                                dbc.Button("v", id={"type": "cp-order-move", "code": code, "dir": "down"}, size="sm", outline=True, color="secondary", disabled=i == len(display) - 1),
-                            ]
-                        ),
-                        width=6,
-                    ),
-                ],
-                className="mb-1 align-items-center",
-            )
-        )
-    return rows
 
 
 def layout(**kwargs):
@@ -190,7 +165,7 @@ def close_instrument_modal(n_clicks, selected, prefs):
     Input("cp-display-instruments", "data"),
 )
 def render_order_rows(display):
-    return _order_rows(display or [])
+    return order_rows(display or [], INSTRUMENT_LABELS, "cp-order-move")
 
 
 @callback(

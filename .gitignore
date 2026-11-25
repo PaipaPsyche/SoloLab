@@ -6,6 +6,7 @@ __pycache__/
 sololab/dash_app/.session_cache/
 sololab/dash_app/.epd_cache/
 sololab/dash_app/.callback_cache/
+sololab/dash_app/.autoplot_cache/
 
 # Scratch scripts used only for local testing
 .scratch/
