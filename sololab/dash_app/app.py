@@ -139,6 +139,7 @@ sidebar = html.Div(
                     vertical=True,
                     pills=True,
                 ),
+                dbc.Button("⚡ Auto Plot", href="/auto-plot", className="w-100 mt-2 btn-autoplot"),
             ],
             className="sidebar-section",
         ),

@@ -559,6 +559,8 @@ def rpw_bkg_combined_figure(hfr_psd, tnr_psd, height=380):
     be merged into one array."""
     fig = go.Figure()
     for psd, color in ((hfr_psd, "red"), (tnr_psd, "blue")):
+        if psd is None:  # only one of HFR/TNR available
+            continue
         frequency = np.asarray(psd["frequency"])
         bkg = np.asarray(psd["bkg"])[:, 0]
         bkg_std = psd.get("bkg_std")
@@ -574,7 +576,7 @@ def rpw_bkg_combined_figure(hfr_psd, tnr_psd, height=380):
             )
         )
     fig.update_xaxes(title="Frequency [kHz]", type="log")
-    fig.update_yaxes(title="Background Flux<br>[SFU]" if hfr_psd["level"] == "L3" else "Background PSD<br>[V^2/Hz]", type="log")
+    fig.update_yaxes(title="Background Flux<br>[SFU]" if (hfr_psd or tnr_psd)["level"] == "L3" else "Background PSD<br>[V^2/Hz]", type="log")
     fig.update_layout(title="Combined RPW-HFR + RPW-TNR Background", height=height, margin=dict(l=60, r=20, t=40, b=40))
     return fig
 
@@ -778,7 +780,7 @@ def resolve_frequency_ranges(display, hfr_psd, tnr_psd, rpw_frequency_range, rpw
     return {"hfr": hfr_range, "tnr": tnr_range}
 
 
-def resolve_common_time_range(time_arrays, date_range=None):
+def resolve_common_time_range(time_arrays, date_range=None, exact=False):
     """Port of the d_range/label_obstime block in quicklook_plot. time_arrays
     is a dict of instrument name -> time array (datetime64 or datetime).
     Returns (start, end, label) as (datetime, datetime, str)."""
@@ -792,6 +794,9 @@ def resolve_common_time_range(time_arrays, date_range=None):
         maxs.append(np.datetime64(date_range[1]))
     start = pd.Timestamp(max(mins)).to_pydatetime()
     end = pd.Timestamp(min(maxs)).to_pydatetime()
+    if exact and date_range:
+        # plot exactly the requested window even where an instrument has gaps
+        start, end = date_range
 
     elapsed = (end - start).total_seconds()
     if elapsed > 36000:
@@ -916,6 +921,7 @@ def quicklook_plot_plotly(
     fontsize=13,
     linewidth=2,
     height_per_panel=140,
+    exact_date_range=False,
 ):
     """Port of quicklook_plot. Builds one go.Figure with N stacked,
     x-shared subplots (one row per panel in resolve_combined_panels),
@@ -945,7 +951,7 @@ def quicklook_plot_plotly(
         time_arrays["stix"] = stix_counts["time"]
     if "epd" in display:
         time_arrays["epd"] = epd_data.index.to_numpy()
-    start, end, label_obstime = resolve_common_time_range(time_arrays, date_range)
+    start, end, label_obstime = resolve_common_time_range(time_arrays, date_range, exact=exact_date_range)
     if start >= end:
         # the selected instruments' time ranges don't overlap (or the
         # "Restrict date range" window misses one of them) - every panel
