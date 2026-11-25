@@ -47,6 +47,8 @@ def build_payload(sid):
             "background": session_store.get(sid, "epd_background"),
             "background_std": session_store.get(sid, "epd_background_std"),
         },
+        # download links shown by the pages' data-sources pop-up
+        "sources": {code: session_store.get(sid, f"sources_{code}") for code in ("stix", "hfr", "tnr", "epd")},
     }
 
 
@@ -70,6 +72,9 @@ def apply_payload(sid, payload):
     instrument-status-store data (merging is the caller's job, since it
     also holds the current State)."""
     status = {}
+    for code, srcs in (payload.get("sources") or {}).items():
+        if srcs:
+            session_store.set(sid, f"sources_{code}", srcs)
 
     stix = payload.get("stix") or {}
     if stix.get("counts") is not None:

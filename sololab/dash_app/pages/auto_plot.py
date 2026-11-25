@@ -13,6 +13,7 @@ import glob
 import logging
 import os
 import re
+import warnings
 from datetime import date, datetime, timedelta
 
 import dash
@@ -26,7 +27,7 @@ from sololab import rpw_read, stix_read
 from sololab.dash_app import plotting
 from sololab.dash_app.constants import EPD_CACHE_DIR, EPD_PARTICLE_OPTIONS, EPD_RESAMPLE_OPTIONS, rpw_key
 from sololab.dash_app.session_store import session_store
-from sololab.dash_app.utils import format_dt_input, order_rows
+from sololab.dash_app.utils import epd_sources, format_dt_input, order_rows, register_sources_modal, rpw_source, stix_source, title_with_sources
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ EPD_BKG_MIN_POINTS = 5  # EPD window = max(5 min, 5 resampled points)
 def layout(**kwargs):
     return dbc.Container(
         [
-            html.H3("Auto Plot", className="mt-3"),
+            title_with_sources("Auto Plot", "ap"),
             html.P(
                 "Pick a start date/time, a window length and the instruments, then press AUTO PLOT: "
                 "the data covering the whole window is downloaded (joining files or days when needed) "
@@ -147,6 +148,9 @@ def _controls():
     ]
 
 
+register_sources_modal("ap")
+
+
 @callback(Output("ap-adv", "is_open"), Input("ap-adv-toggle", "n_clicks"), State("ap-adv", "is_open"), prevent_initial_call=True)
 def toggle_advanced(_n, is_open):
     return not is_open
@@ -217,10 +221,14 @@ def _stix_fetch(start, end):
         results = stix_read.stix_query_science_files(start.strftime(fmt), end.strftime(fmt), "xray-l1")
     if not results:
         raise FileNotFoundError("no STIX files on the Data Center for this window")
-    counts = [stix_read.stix_create_counts(stix_read.stix_download_file(r["file_id"], STIX_CACHE_DIR)) for r in latest_versions(results)]
+    counts, sources = [], []
+    for r in latest_versions(results):
+        path = stix_read.stix_download_file(r["file_id"], STIX_CACHE_DIR)
+        counts.append(stix_read.stix_create_counts(path))
+        sources.append(stix_source(os.path.basename(path), r["file_id"]))
     joined = counts[0] if len(counts) == 1 else stix_read.stix_combine_counts(counts, force=True)
     joined["time"] = np.asarray(joined["time"])
-    return joined
+    return joined, sources
 
 
 def _rpw_day_path(day, data_type):
@@ -247,16 +255,17 @@ def join_psds(psds):
 def _rpw_fetch(start, end, data_type):
     last = (end - timedelta(microseconds=1)).date()
     days = [start.date() + timedelta(days=k) for k in range((last - start.date()).days + 1)]
-    psds, missing = [], []
+    psds, missing, sources = [], [], []
     for day in days:
         try:
-            data = rpw_read.rpw_get_data(_rpw_day_path(day, data_type))
-            psds.append(rpw_read.rpw_create_PSD(data, which_freqs="non_zero"))
+            path = _rpw_day_path(day, data_type)
+            psds.append(rpw_read.rpw_create_PSD(rpw_read.rpw_get_data(path), which_freqs="non_zero"))
+            sources.append(rpw_source(os.path.basename(path)))
         except FileNotFoundError:
             missing.append(f"{day}")
     if not psds:
         raise FileNotFoundError(f"no RPW-{data_type.upper()} L3 files on CDAWeb for {', '.join(missing)}")
-    return join_psds(psds)
+    return join_psds(psds), sources
 
 
 def epd_channels(n):
@@ -286,8 +295,9 @@ def _get_or_fetch(code, sid, status, start, end, particle="Electron"):
         cur = session_store.get(sid, "stix_counts_final") if status.get("stix", {}).get("loaded") else None
         if cur is not None and _covers(cur["time"], start, end):
             return cur, None
-        counts = _stix_fetch(start, end)
+        counts, sources = _stix_fetch(start, end)
         session_store.set(sid, "stix_counts_final", counts)
+        session_store.set(sid, "sources_stix", sources)
         session_store.set(sid, "stix_meta", {"bkg_file_enabled": False, "bkg_time_enabled": False, "bkg_poll_function": "mean"})
         return counts, {
             "loaded": True, "min_time": format_dt_input(min(counts["time"])),
@@ -298,8 +308,9 @@ def _get_or_fetch(code, sid, status, start, end, particle="Electron"):
         cur = session_store.get(sid, key) if status.get(f"rpw_{code}", {}).get("loaded") else None
         if cur is not None and _covers(cur["time"], start, end):
             return cur, None
-        psd = _rpw_fetch(start, end, code)
+        psd, sources = _rpw_fetch(start, end, code)
         session_store.set(sid, key, psd)
+        session_store.set(sid, f"sources_{code}", sources)
         session_store.set(sid, rpw_key(code, "meta"), {"bkg_option": 0, "bkg_poll_function": "median"})
         return psd, {
             "loaded": True, "min_time": format_dt_input(min(psd["time"])),
@@ -312,6 +323,7 @@ def _get_or_fetch(code, sid, status, start, end, particle="Electron"):
     if cur is not None and _covers(cur.index, start, end):
         return (cur, session_store.get(sid, "epd_energies")), None
     df_p, df_e, energies = _epd_fetch(start, end)
+    session_store.set(sid, "sources_epd", epd_sources(start, end))
     df = df_e if particle == "Electron" else df_p
     for name, val in (("epd_protons_df", df_p), ("epd_electrons_df", df_e), ("epd_energies", energies), (final_key, df)):
         session_store.set(sid, name, val)
@@ -337,7 +349,9 @@ def auto_bkg(times, values, window=AUTO_BKG_WINDOW):
     med = roll.median().to_numpy()[full]
     std = roll.std().to_numpy()[full]
     lo = np.nanmin(np.where(np.isnan(med), np.inf, med), axis=0)
-    typical = np.nanmedian(np.where(med > 0, med, np.nan), axis=0)
+    with warnings.catch_warnings():  # all-zero channels -> "All-NaN slice"; handled just below
+        warnings.simplefilter("ignore", RuntimeWarning)
+        typical = np.nanmedian(np.where(med > 0, med, np.nan), axis=0)
     scale = np.where(lo > 0, lo, np.where(typical > 0, typical, 1.0))  # channels that touch 0
     with np.errstate(invalid="ignore"):
         norm = np.sqrt(np.nansum(((med - lo) / scale) ** 2, axis=1))

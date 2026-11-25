@@ -22,7 +22,7 @@ from dash.exceptions import PreventUpdate
 from sololab.dash_app import plotting
 from sololab.dash_app.constants import DEFAULT_PLOT_PREFS, INSTRUMENT_ORDER, rpw_key
 from sololab.dash_app.session_store import session_store
-from sololab.dash_app.utils import format_dt_input, order_rows, parse_dt_input
+from sololab.dash_app.utils import format_dt_input, order_rows, parse_dt_input, register_sources_modal, title_with_sources
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ STATUS_KEYS = {"stix": "stix", "hfr": "rpw_hfr", "tnr": "rpw_tnr", "epd": "epd"}
 def layout(**kwargs):
     return dbc.Container(
         [
-            html.H3("Combined Plot", className="mt-3"),
+            title_with_sources("Combined Plot", "cp"),
             dbc.Alert(id="cp-alert", is_open=False, dismissable=True, className="mt-2"),
             dbc.Row(
                 [
@@ -86,6 +86,9 @@ def layout(**kwargs):
         ],
         className="pb-5",
     )
+
+
+register_sources_modal("cp")
 
 
 # --- restore persisted settings on page mount -----------------------------------------

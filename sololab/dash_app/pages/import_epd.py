@@ -30,7 +30,7 @@ from sololab.dash_app.constants import (
     EPD_RESAMPLE_OPTIONS,
 )
 from sololab.dash_app.session_store import session_store
-from sololab.dash_app.utils import format_dt_input, parse_dt_input
+from sololab.dash_app.utils import epd_sources, format_dt_input, parse_dt_input
 from sololab.values import get_poll_func
 
 logger = logging.getLogger(__name__)
@@ -378,6 +378,7 @@ def epd_load_click(n_clicks, date_str, particle, resample, bkg_enabled, bkg_star
 
     final_key = "epd_electrons_final" if particle == "Electron" else "epd_protons_final"
     session_store.set(sid, final_key, df)
+    session_store.set(sid, "sources_epd", epd_sources(date_str, date_str))
     session_store.set(
         sid, "epd_meta",
         {"date": date_str, "particle": particle, "resample": resample, "bkg_enabled": bool(bkg_enabled), "bkg_poll_function": poll},

@@ -44,7 +44,7 @@ background_callback_manager = DiskcacheManager(diskcache.Cache(_background_callb
 app = dash.Dash(
     __name__,
     use_pages=True,
-    external_stylesheets=[dbc.themes.FLATLY],
+    external_stylesheets=[dbc.themes.FLATLY, dbc.icons.BOOTSTRAP],
     suppress_callback_exceptions=True,
     title="SoloLab",
     background_callback_manager=background_callback_manager,

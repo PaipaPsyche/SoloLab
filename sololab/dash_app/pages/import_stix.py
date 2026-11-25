@@ -26,6 +26,7 @@ from sololab.dash_app.utils import (
     decode_upload,
     format_dt_input,
     parse_dt_input,
+    stix_source,
     tempfile_from_bytes,
     to_stix_date_str,
 )
@@ -272,6 +273,7 @@ def on_stix_upload(contents, filename, sid):
     if not contents:
         return "", True, True, True
     session_store.set(sid, "stix_file_bytes", (filename, decode_upload(contents)))
+    session_store.set(sid, "stix_file_source", stix_source(filename))
     return f"Selected: {filename}", False, False, False
 
 
@@ -346,6 +348,7 @@ def stix_download(n_clicks, file_id, sid):
     try:
         filename, data = _download_stix_bytes(file_id)
         session_store.set(sid, "stix_file_bytes", (filename, data))
+        session_store.set(sid, "stix_file_source", stix_source(filename, file_id))
         return f"Selected: {filename}", False, False, False, "", "success", False
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled error in callback")
@@ -507,6 +510,8 @@ def stix_load(n_clicks, bkg_file_enabled, bkg_time_enabled, bkg_start, bkg_end, 
     try:
         counts = _compute_stix_counts(sid, bkg_file_enabled, bkg_time_enabled, bkg_start, bkg_end, poll)
         session_store.set(sid, "stix_counts_final", counts)
+        session_store.set(sid, "sources_stix", [session_store.get(sid, "stix_file_source")
+                                                or stix_source(session_store.get(sid, "stix_file_bytes")[0])])
         session_store.set(
             sid,
             "stix_meta",

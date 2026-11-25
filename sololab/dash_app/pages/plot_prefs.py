@@ -25,17 +25,23 @@ from sololab.dash_app.constants import (
     rpw_key,
 )
 from sololab.dash_app.session_store import session_store
-from sololab.dash_app.utils import make_list_editor_modal, register_list_editor_add_row_callback
+from sololab.dash_app.utils import (
+    make_list_editor_modal,
+    register_list_editor_add_row_callback,
+    register_sources_modal,
+    title_with_sources,
+)
 
 logger = logging.getLogger(__name__)
 
 dash.register_page(__name__, path="/plot-prefs", name="Plot Preferences")
+register_sources_modal("pp")
 
 
 def layout(**kwargs):
     return dbc.Container(
         [
-            html.H3("Plot Preferences", className="mt-3"),
+            title_with_sources("Plot Preferences", "pp"),
             dbc.Alert(id="plotprefs-alert", is_open=False, dismissable=True, className="mt-2"),
             dbc.Row(
                 [

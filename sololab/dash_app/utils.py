@@ -5,6 +5,7 @@ ranges, RPW frequencies and EPD channels in pages/plot_prefs.py).
 import base64
 import contextlib
 import os
+import re
 import shutil
 import tempfile
 from datetime import datetime
@@ -14,6 +15,7 @@ import pandas as pd
 from dash import Input, Output, State, callback, dash_table, html
 from dash.exceptions import PreventUpdate
 
+from sololab.rpw_read import RPW_CDAWEB_BASE_URL, RPW_CDAWEB_L3_TYPES
 from sololab.values import std_date_fmt
 
 # All datetime text inputs in the Dash app (bkg start/end, combined-plot
@@ -200,3 +202,99 @@ def order_rows(display, labels, id_type):
             )
         )
     return rows
+
+
+# Data sources (download-icon button + pop-up) -----------------------------------
+#
+# Each load path stores session_store[f"sources_{code}"] = [{"label", "url"}]
+# (code in stix/hfr/tnr/epd); url is None for uploaded files with no known origin.
+
+SOURCE_LABELS = {"stix": "STIX", "hfr": "RPW-HFR", "tnr": "RPW-TNR", "epd": "EPD"}
+SOURCE_STATUS_KEYS = {"stix": "stix", "hfr": "rpw_hfr", "tnr": "rpw_tnr", "epd": "epd"}
+STIX_DOWNLOAD_URL = "https://datacenter.stix.i4ds.net/download/fits/"
+SOAR_DOWNLOAD_URL = "https://soar.esac.esa.int/soar-sl-tap/data?retrieval_type=LAST_PRODUCT&product_type=SCIENCE&data_item_id="
+
+
+def _span(t0, t1):
+    return f"{t0:%Y-%m-%d %H:%M} - {t1:%H:%M}" if t0.date() == t1.date() else f"{t0:%Y-%m-%d %H:%M} - {t1:%Y-%m-%d %H:%M}"
+
+
+def stix_source(filename, file_id=None):
+    m = re.search(r"solo_(L\w+?)_stix-sci-xray-([a-z]+)\w*?_(\d{8}T\d{6})-(\d{8}T\d{6})", filename or "")
+    url = f"{STIX_DOWNLOAD_URL}{file_id}" if file_id is not None else None
+    if not m:
+        return {"label": f"STIX - {filename}", "url": url}
+    level, kind, t0, t1 = m.groups()
+    t0, t1 = (datetime.strptime(t, "%Y%m%dT%H%M%S") for t in (t0, t1))
+    kind = "spectrogram" if kind.startswith("spec") else "pixel data"
+    return {"label": f"STIX {level} {kind}, {_span(t0, t1)}", "url": url}
+
+
+def rpw_source(filename):
+    m = re.search(r"solo_l3_rpw-(hfr|tnr)-surv-flux_(\d{8})_v\d+\.cdf", filename or "")
+    if not m:
+        return {"label": f"RPW - {filename}", "url": None}
+    data_type, day = m.group(1), datetime.strptime(m.group(2), "%Y%m%d")
+    return {
+        "label": f"RPW-{data_type.upper()} L3, {day:%Y-%m-%d}",
+        "url": f"{RPW_CDAWEB_BASE_URL}/{RPW_CDAWEB_L3_TYPES[data_type]}/{day:%Y}/{m.group(0)}",
+    }
+
+
+def epd_sources(first_day, last_day, viewing="sun"):
+    days = pd.date_range(pd.Timestamp(first_day).normalize(), pd.Timestamp(last_day).normalize(), freq="D")
+    return [
+        {"label": f"EPD-EPT L2 ({viewing}), {d:%Y-%m-%d}", "url": f"{SOAR_DOWNLOAD_URL}solo_L2_epd-ept-{viewing}-rates_{d:%Y%m%d}"}
+        for d in days
+    ]
+
+
+def title_with_sources(title, prefix):
+    """Page title + small download-icon button opening the data-sources pop-up.
+    Pair with register_sources_modal(prefix)."""
+    return html.Div(
+        [
+            html.H3(title, className="mb-0"),
+            dbc.Button(
+                html.I(className="bi bi-download"), id=f"{prefix}-src-btn", size="sm",
+                color="secondary", outline=True, title="Download the data used",
+            ),
+            dbc.Modal(
+                [dbc.ModalHeader(dbc.ModalTitle("Data sources")), dbc.ModalBody(id=f"{prefix}-src-body")],
+                id=f"{prefix}-src-modal", is_open=False,
+            ),
+        ],
+        className="d-flex align-items-center gap-2 mt-3",
+    )
+
+
+def sources_list(sid, status):
+    from sololab.dash_app.session_store import session_store
+
+    items = []
+    for code, label in SOURCE_LABELS.items():
+        if not (status or {}).get(SOURCE_STATUS_KEYS[code], {}).get("loaded"):
+            continue
+        srcs = session_store.get(sid, f"sources_{code}") or []
+        if not srcs:
+            items.append(html.Li(f"{label}: source not recorded (loaded before this feature)", className="text-muted"))
+        for src in srcs:
+            items.append(html.Li(html.A(src["label"], href=src["url"], target="_blank") if src.get("url") else src["label"]))
+    if not items:
+        return html.Div("No data loaded yet.", className="text-muted")
+    return [html.Div("Files behind the currently loaded data:", className="small text-muted mb-2"), html.Ul(items, className="mb-0")]
+
+
+def register_sources_modal(prefix):
+    @callback(
+        Output(f"{prefix}-src-modal", "is_open"),
+        Output(f"{prefix}-src-body", "children"),
+        Input(f"{prefix}-src-btn", "n_clicks"),
+        State("session-id", "data"),
+        State("instrument-status-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _open_sources(n_clicks, sid, status):
+        if not n_clicks:
+            raise PreventUpdate
+        return True, sources_list(sid, status)

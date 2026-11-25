@@ -25,7 +25,7 @@ from sololab import rpw_read
 from sololab.dash_app import plotting
 from sololab.dash_app.constants import RPW_POLL_DEFAULT, RPW_POLL_OPTIONS, rpw_key
 from sololab.dash_app.session_store import session_store
-from sololab.dash_app.utils import decode_upload, format_dt_input, parse_dt_input, tempfile_from_bytes
+from sololab.dash_app.utils import decode_upload, format_dt_input, parse_dt_input, rpw_source, tempfile_from_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -410,6 +410,7 @@ def register_rpw_import_callbacks(data_type):
             else:
                 psd = _load_psd(sid)
             session_store.set(sid, rpw_key(data_type, "psd_final"), psd)
+            session_store.set(sid, f"sources_{data_type}", [rpw_source(session_store.get(sid, rpw_key(data_type, "file_bytes"))[0])])
             session_store.set(sid, rpw_key(data_type, "meta"), {"bkg_option": bkg_option, "bkg_poll_function": poll})
             status = dict(status or {})
             status[status_key] = {
